@@ -13,7 +13,7 @@ from kornia.geometry.conversions import rotation_matrix_to_angle_axis
 
 
 def ik_solver_mano(mano_shape, pred_joints):
-    mano_layer = ManoLayer(flat_hand_mean=True, side="right", mano_root='../common/mano/assets', use_pca=False, center_idx=0)
+    mano_layer = ManoLayer(flat_hand_mean=True, side="right", mano_root='/home/zhouyaqing/HO_OccNet/common/mano/assets', use_pca=False, center_idx=0)
     mano_layer = mano_layer.cuda()
     batch_size = pred_joints.shape[0]
 
@@ -39,6 +39,7 @@ def ik_solver_mano(mano_shape, pred_joints):
     mano_axisang[batch_id, 0] = rotation_matrix_to_angle_axis(R)[batch_id]
     mano_pose[batch_id, 0] = R[batch_id]
 
+    # define the finger joints chain
     finger_list = [[0, 5, 6, 7, 8], [0, 9, 10, 11, 12], [0, 17, 18, 19, 20], [0, 13, 14, 15, 16], [0, 1, 2, 3, 4]]
     for group_idx, group in enumerate(finger_list):
         recon_joints = torch.zeros((batch_size, 5, 3), dtype=torch.float32, device=pred_joints.device)

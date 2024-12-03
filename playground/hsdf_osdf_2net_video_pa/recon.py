@@ -16,7 +16,7 @@ import yaml
 import json
 from loguru import logger
 from config import cfg
-from net import kinematic_embedding, pixel_align
+from playground.hsdf_osdf_2net_video_pa.net_old import kinematic_embedding, pixel_align
 from utils.mesh import customized_export_ply
 from utils.solver import icp_ts
 from mano.manolayer import ManoLayer
@@ -73,7 +73,7 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
             sample_subset = samples[head : min(head + max_batch, num_samples), 0:3].cuda()
             if cfg.hand_encode_style == 'kine':
                 if cfg.test_with_gt:
-                    mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='../common/mano/assets/', use_pca=False, flat_hand_mean=True).cuda()
+                    mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='/home/zhouyaqing/HO_OccNet/common/mano/assets', use_pca=False, flat_hand_mean=True).cuda()
                     _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas['hand_poses'], th_betas=metas['hand_shapes'], root_palm=False)
                     gt_hand_pose_results = {}
                     gt_hand_pose_results['global_trans'] = gt_global_trans
@@ -82,7 +82,7 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
                 else:
                     hand_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], hand_pose_results, 'hand')
             elif cfg.hand_encode_style == 'gt_kine':
-                mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='../common/mano/assets/', use_pca=False, flat_hand_mean=True).cuda()
+                mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='/home/zhouyaqing/HO_OccNet/common/mano/assets', use_pca=False, flat_hand_mean=True).cuda()
                 _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas['hand_poses'], th_betas=metas['hand_shapes'], root_palm=False)
                 gt_hand_pose_results = {}
                 gt_hand_pose_results['global_trans'] = gt_global_trans
@@ -166,7 +166,7 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
 
             if cfg.hand_encode_style == 'kine':
                 if cfg.test_with_gt:
-                    mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='../common/mano/assets/', use_pca=False, flat_hand_mean=True).cuda()
+                    mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='/home/zhouyaqing/HO_OccNet/common/mano/assets', use_pca=False, flat_hand_mean=True).cuda()
                     _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas['hand_poses'], th_betas=metas['hand_shapes'], root_palm=False)
                     gt_hand_pose_results = {}
                     gt_hand_pose_results['global_trans'] = gt_global_trans
@@ -175,7 +175,7 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
                 else:
                     hand_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], hand_pose_results, 'hand')
             elif cfg.hand_encode_style == 'gt_kine':
-                mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='../common/mano/assets/', use_pca=False, flat_hand_mean=True).cuda()
+                mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='/home/zhouyaqing/HO_OccNet/common/mano/assets', use_pca=False, flat_hand_mean=True).cuda()
                 _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas['hand_poses'], th_betas=metas['hand_shapes'], root_palm=False)
                 gt_hand_pose_results = {}
                 gt_hand_pose_results['global_trans'] = gt_global_trans

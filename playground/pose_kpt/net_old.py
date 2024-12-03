@@ -12,8 +12,6 @@ import time
 from torch.nn import functional as F
 from config import cfg
 from networks.backbones.resnet import ResNetBackbone
-from networks.backbones.backbone import FPN
-from networks.backbones.transformer import Transformer
 from networks.necks.unet import UNet
 from networks.heads.sdf_head import SDFHead
 from networks.heads.mano_head import ManoHead
@@ -27,15 +25,11 @@ from utils.pose_utils import soft_argmax, decode_volume, decode_volume_abs
 
 
 class model(nn.Module):
-    def __init__(self, cfg, backbone, FIT, SET, downsample, neck, volume_head, obj_rot_head):
+    def __init__(self, cfg, backbone, neck, volume_head, obj_rot_head):
         super(model, self).__init__()
         self.cfg = cfg
         self.backbone = backbone
-        # self.dim_backbone_feat = 2048 if cfg.backbone == 'resnet_50' else 512
-        self.FIT = FIT
-        self.SET = SET
-        # downsample the feature map to 64x64
-        self.downsample = downsample
+        self.dim_backbone_feat = 2048 if cfg.backbone == 'resnet_50' else 512
         self.neck = neck
         self.volume_head = volume_head
         self.obj_rot_head = obj_rot_head
@@ -48,19 +42,16 @@ class model(nn.Module):
     def forward(self, inputs, targets=None, metas=None, mode='train'):
         if mode == 'train':
             input_img = inputs['img']
-            p_feats, s_feats = self.backbone(input_img)
-            feats = self.FIT(s_feats, p_feats)
-            feats = self.SET(feats, feats)
-            feats = self.downsample(feats)
+            backbone_feat = self.backbone(input_img)
 
-            hm_feat = self.neck(feats)
+            hm_feat = self.neck(backbone_feat)
             hm_pred = self.volume_head(hm_feat)
             num_joints = 22 if cfg.hand_branch and cfg.obj_branch else 21
             hm_pred, hm_conf = soft_argmax(cfg, hm_pred, num_joints)
             volume_joint_preds = decode_volume(cfg, hm_pred, metas['hand_center_3d'], metas['cam_intr'])
 
             if self.obj_rot_head is not None:
-                rot_feat = self.obj_rot_head(feats.mean(3).mean(2))
+                rot_feat = self.obj_rot_head(backbone_feat.mean(3).mean(2))
                 if cfg.rot_style == 'axisang':
                     obj_rot_matrix = batch_rodrigues(rot_feat).view(rot_feat.shape[0], 3, 3)
                 elif cfg.rot_style == '6d':
@@ -104,12 +95,9 @@ class model(nn.Module):
         else:
             with torch.no_grad():
                 input_img = inputs['img']
-                p_feats, s_feats = self.backbone(input_img)
-                feats = self.FIT(s_feats, p_feats)
-                feats = self.SET(feats, feats)
-                feats = self.downsample(feats)
+                backbone_feat = self.backbone(input_img)
 
-                hm_feat = self.neck(feats)
+                hm_feat = self.neck(backbone_feat)
                 hm_pred = self.volume_head(hm_feat)
                 num_joints = 22 if cfg.hand_branch and cfg.obj_branch else 21
                 hm_pred, hm_conf = soft_argmax(cfg, hm_pred, num_joints)
@@ -119,7 +107,7 @@ class model(nn.Module):
                     volume_joint_preds = decode_volume(cfg, hm_pred, metas['hand_center_3d'], metas['cam_intr'])
 
                 if self.obj_rot_head is not None:
-                    rot_feat = self.obj_rot_head(feats.mean(3).mean(2))
+                    rot_feat = self.obj_rot_head(backbone_feat.mean(3).mean(2))
                     if cfg.rot_style == 'axisang':
                         obj_rot_matrix = batch_rodrigues(rot_feat).view(rot_feat.shape[0], 3, 3)
                     elif cfg.rot_style == '6d':
@@ -143,31 +131,14 @@ class model(nn.Module):
 
             return hand_pose_results, obj_pose_results
 
-def init_weights(m):
-    if type(m) == nn.ConvTranspose2d:
-        nn.init.normal_(m.weight,std=0.001)
-    elif type(m) == nn.Conv2d:
-        nn.init.normal_(m.weight,std=0.001)
-        nn.init.constant_(m.bias, 0)
-    elif type(m) == nn.BatchNorm2d:
-        nn.init.constant_(m.weight,1)
-        nn.init.constant_(m.bias,0)
-    elif type(m) == nn.Linear:
-        nn.init.normal_(m.weight,std=0.01)
-        nn.init.constant_(m.bias,0)
 
 def get_model(cfg, is_train):
-    # num_resnet_layers = int(cfg.backbone.split('_')[-1])
-    backbone = FPN(pretrained=True)
-    FIT = Transformer(injection=True)
-    SET = Transformer(injection=False)
-    downsample = nn.Conv2d(256, 256, kernel_size=4, stride=4, padding=0)
+    num_resnet_layers = int(cfg.backbone.split('_')[-1])
+    backbone = ResNetBackbone(num_resnet_layers)
     if is_train:
-        FIT.apply(init_weights)
-        SET.apply(init_weights)
-        downsample.apply(init_weights)
+        backbone.init_weights()
 
-    neck_inplanes = 256
+    neck_inplanes = 2048 if num_resnet_layers == 50 else 512
     neck = UNet(neck_inplanes, 256, 3)
     
     if cfg.hand_branch and cfg.obj_branch:
@@ -183,7 +154,7 @@ def get_model(cfg, is_train):
     else:
         obj_rot_head = None
     
-    ho_model = model(cfg, backbone, FIT, SET, downsample, neck, volume_head, obj_rot_head)
+    ho_model = model(cfg, backbone, neck, volume_head, obj_rot_head)
 
     return ho_model
 

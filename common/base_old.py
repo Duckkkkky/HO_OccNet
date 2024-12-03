@@ -47,52 +47,7 @@ class Trainer(Base):
         super(Trainer, self).__init__(log_name = 'train_logs.txt')
 
     def get_optimizer(self, model):
-        if hasattr(model, 'module'):
-            model_without_ddp = model.module
-        else:
-            model_without_ddp = model
-        
-        if cfg.task == 'pose_kpt':
-            param_dicts = [
-            {"params": model_without_ddp.backbone.parameters(), "lr": cfg.lr * 0.1},  # backbone small lr
-            {"params": model_without_ddp.FIT.parameters(), "lr": cfg.lr * 0.5},      # transformer medium lr
-            {"params": model_without_ddp.SET.parameters(), "lr": cfg.lr * 0.5},
-            {"params": model_without_ddp.downsample.parameters(), "lr": cfg.lr},     # other modules use base lr
-            {"params": model_without_ddp.neck.parameters(), "lr": cfg.lr},
-            {"params": model_without_ddp.volume_head.parameters(), "lr": cfg.lr}
-        ]
-            if hasattr(model_without_ddp, 'obj_rot_head') and model_without_ddp.obj_rot_head is not None:
-                param_dicts.append({"params": model_without_ddp.obj_rot_head.parameters(), "lr": cfg.lr})
-
-        elif cfg.task == 'hsdf_osdf_2net_video_pa':
-            param_dicts = [
-            # backbone related
-            {"params": model_without_ddp.backbone.parameters(), "lr": cfg.lr * 0.1},
-            {"params": model_without_ddp.backbone_2_sdf.parameters(), "lr": cfg.lr},
-            
-            # transformer related
-            {"params": model_without_ddp.FIT.parameters(), "lr": cfg.lr * 0.5},
-            {"params": model_without_ddp.SET.parameters(), "lr": cfg.lr * 0.5},
-            {"params": model_without_ddp.feat_transformer.parameters(), "lr": cfg.lr},
-            
-            # other modules use base lr
-            {"params": model_without_ddp.downsample.parameters(), "lr": cfg.lr},
-            {"params": model_without_ddp.neck.parameters(), "lr": cfg.lr},
-            {"params": model_without_ddp.volume_head.parameters(), "lr": cfg.lr},
-            {"params": model_without_ddp.sdf_encoder.parameters(), "lr": cfg.lr}
-        ]
-        
-        # optional modules
-        if hasattr(model_without_ddp, 'hand_sdf_head') and model_without_ddp.hand_sdf_head is not None:
-            param_dicts.append({"params": model_without_ddp.hand_sdf_head.parameters(), "lr": cfg.lr})
-        if hasattr(model_without_ddp, 'obj_sdf_head') and model_without_ddp.obj_sdf_head is not None:
-            param_dicts.append({"params": model_without_ddp.obj_sdf_head.parameters(), "lr": cfg.lr})
-        if hasattr(model_without_ddp, 'rot_head') and model_without_ddp.rot_head is not None:
-            param_dicts.append({"params": model_without_ddp.rot_head.parameters(), "lr": cfg.lr})
-        else:
-            param_dicts = [{"params": filter(lambda p: p.requires_grad, model_without_ddp.parameters()), "lr": cfg.lr}]    
-        optimizer = torch.optim.Adam(param_dicts)
-        # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=cfg.lr)
+        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=cfg.lr)
         return optimizer
 
     def save_model(self, state, epoch):
@@ -199,41 +154,24 @@ class Trainer(Base):
         elif cfg.task == 'hsdf_osdf_2net_video_pa' and os.path.exists(cfg.ckpt):
             ckpt = torch.load(cfg.ckpt, map_location=torch.device('cpu'))['network']
             ckpt = {k.replace('module.', ''): v for k, v in ckpt.items()}
-            new_ckpt = {}
+            components = ['pose_model', 'backbone', 'neck', 'volume_head', 'hand_sdf_head', 'obj_sdf_head', 'backbone_2_sdf', 'sdf_encoder']
+            components_ckpts = [{} for i in range(len(components))]
             for k, v in ckpt.items():
-                if 'backbone.attention_spatial' in k:
-                    # replace key name
-                    new_key = k.replace('backbone.attention_spatial', 'backbone.attention_module.spatial')
-                    new_ckpt[new_key] = v
-                else:
-                    new_ckpt[k] = v
-            ckpt = new_ckpt
-            if 'pose_kpt' in cfg.ckpt:
-                model.module.pose_model.load_state_dict(ckpt)
-                self.logger.info('Load checkpoint from {}'.format(cfg.ckpt))
-                model.module.pose_model.eval()
-            else:
-                components = ['pose_model', 'backbone', 'FIT', 'SET', 'downsample', 'neck', 'volume_head', 'hand_sdf_head', 'obj_sdf_head', 'backbone_2_sdf', 'sdf_encoder']
-                components_ckpts = [{} for i in range(len(components))]
-                for k, v in ckpt.items():
-                    for i in range(len(components)):
-                        if k.split('.')[0] == components[i]:
-                            new_key = '.'.join(k.split('.')[1:])
-                            components_ckpts[i][new_key] = v
+                for i in range(len(components)):
+                    if k.split('.')[0] == components[i]:
+                        new_key = '.'.join(k.split('.')[1:])
+                        components_ckpts[i][new_key] = v
                 
-                model.module.pose_model.load_state_dict(components_ckpts[0])
-                model.module.backbone.load_state_dict(components_ckpts[1])
-                model.module.FIT.load_state_dict(components_ckpts[2])
-                model.module.SET.load_state_dict(components_ckpts[3])
-                model.module.downsample.load_state_dict(components_ckpts[4])
-                model.module.neck.load_state_dict(components_ckpts[5])
-                model.module.volume_head.load_state_dict(components_ckpts[6])
-                model.module.hand_sdf_head.load_state_dict(components_ckpts[7])
-                model.module.obj_sdf_head.load_state_dict(components_ckpts[8])
-                model.module.backbone_2_sdf.load_state_dict(components_ckpts[9])
-                model.module.sdf_encoder.load_state_dict(components_ckpts[10])
-                self.logger.info('Load checkpoint from {}'.format(cfg.ckpt))
-                model.module.pose_model.eval()
+            model.module.pose_model.load_state_dict(components_ckpts[0])
+            model.module.backbone.load_state_dict(components_ckpts[1])
+            model.module.neck.load_state_dict(components_ckpts[2])
+            model.module.volume_head.load_state_dict(components_ckpts[3])
+            model.module.hand_sdf_head.load_state_dict(components_ckpts[4])
+            model.module.obj_sdf_head.load_state_dict(components_ckpts[5])
+            model.module.backbone_2_sdf.load_state_dict(components_ckpts[6])
+            model.module.sdf_encoder.load_state_dict(components_ckpts[7])
+            self.logger.info('Load checkpoint from {}'.format(cfg.ckpt))
+            model.module.pose_model.eval()
 
         start_epoch, model, optimizer = self.load_model(model, optimizer)
         self.start_epoch = start_epoch

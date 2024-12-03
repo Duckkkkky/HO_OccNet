@@ -1,192 +1,153 @@
-#!/usr/bin/env python3
-# -*- encoding: utf-8 -*-
-#@File        :transformer.py
-#@Date        :2022/09/29 15:06:45
-#@Author      :zerui chen
-#@Contact     :zerui.chen@inria.fr
-
 import torch
-from torch import nn, einsum
-from einops import rearrange, repeat
-from einops.layers.torch import Rearrange
+import torch.nn as nn
+import torch.nn.functional as F
+from einops import repeat
 
-
-class PreNorm(nn.Module):
-    def __init__(self, dim, fn):
+class Transformer(nn.Module):
+    def __init__(self, inp_res=32, dim=256, depth=2, num_heads=4, mlp_ratio=4., injection=True):
         super().__init__()
-        self.norm = nn.LayerNorm(dim)
-        self.fn = fn
-    def forward(self, x, **kwargs):
-        return self.fn(self.norm(x), **kwargs)
 
+        self.injection=injection
+        
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(Block(dim=dim, num_heads=num_heads, mlp_ratio=mlp_ratio, injection=injection))
 
-class FeedForward(nn.Module):
-    def __init__(self, dim, hidden_dim, dropout=0.):
+        if self.injection:
+            self.conv1 = nn.Sequential(
+                nn.Conv2d(dim*2, dim, 3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(dim, dim, 3, padding=1),
+            )
+            self.conv2 = nn.Sequential(
+                nn.Conv2d(dim*2, dim, 1, padding=0),
+            )
+
+    def forward(self, query, key):
+        output = query
+        for i, layer in enumerate(self.layers):
+            output = layer(query=output, key=key)
+        
+        if self.injection:
+            output = torch.cat([key, output], dim=1)
+            output = self.conv1(output) + self.conv2(output)
+
+        return output
+
+class Mlp(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, dim),
-            nn.Dropout(dropout)
-        )
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.act = act_layer()
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.drop = nn.Dropout(drop)
+        self._init_weights()
+
     def forward(self, x):
-        return self.net(x)
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+    def _init_weights(self):
+        nn.init.xavier_uniform_(self.fc1.weight)
+        nn.init.xavier_uniform_(self.fc2.weight)
+        nn.init.normal_(self.fc1.bias, std=1e-6)
+        nn.init.normal_(self.fc2.bias, std=1e-6)
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0.):
+    def __init__(self, dim, num_heads=1):
         super().__init__()
-        inner_dim = dim_head * heads
-        project_out = not (heads == 1 and dim_head == dim)
-
-        self.heads = heads
-        self.scale = dim_head ** -0.5
-
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
-
-        self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, dim),
-            nn.Dropout(dropout)
-        ) if project_out else nn.Identity()
-
-    def forward(self, x):
-        b, n, _, h = *x.shape, self.heads
-        qkv = self.to_qkv(x).chunk(3, dim = -1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), qkv)
-
-        dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
-
-        attn = dots.softmax(dim=-1)
-
-        out = einsum('b h i j, b h j d -> b h i d', attn, v)
-        out = rearrange(out, 'b h n d -> b n (h d)')
-        out =  self.to_out(out)
-        return out
-
-
-class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.):
-        super().__init__()
-        self.layers = nn.ModuleList([])
-        self.norm = nn.LayerNorm(dim)
-        for _ in range(depth):
-            self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
-                PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
-            ]))
-
-    def forward(self, x):
-        for attn, ff in self.layers:
-            x = attn(x) + x
-            x = ff(x) + x
-        return self.norm(x)
-
-
-class VideoTransformer(nn.Module):
-    def __init__(self, image_size, num_frames, dim=256, depth=4, heads=4, in_channels=256, dim_head=64, dropout=0., scale_dim=4, use_temporary_embedding=False, patch_size=1, sep_output=True):
-        super().__init__()
-        self.sep_output = sep_output
-        self.patch_size = patch_size
-        num_patches = (image_size // patch_size) ** 2
-        patch_dim = in_channels * patch_size ** 2
-        self.to_patch_embedding = nn.Sequential(
-            Rearrange('b t c (h p1) (w p2) -> b t (h w) (p1 p2 c)', p1=patch_size, p2=patch_size),
-            nn.Linear(patch_dim, dim),
-        )
-
-        self.image_size = image_size
-        if use_temporary_embedding:
-            self.pos_embedding = nn.Parameter(torch.randn(1, num_frames, num_patches, dim))
-        else:
-            self.pos_embedding = nn.Parameter(torch.randn(1, 1, num_patches, dim))
-        self.spatial_transformer = Transformer(dim, depth, heads, dim_head, dim * scale_dim, dropout)
-        self.temporal_transformer = Transformer(dim, depth, heads, dim_head, dim * scale_dim, dropout)
-
-    def forward(self, x):
-        x = self.to_patch_embedding(x)
-        b, t, n, _ = x.shape
-
-        x += self.pos_embedding[:, :t, :n]
-        x = rearrange(x, 'b t n d -> (b t) n d')
-        x = self.spatial_transformer(x)
-        x = rearrange(x, '(b t) n d -> (b n) t d', t=t)
-        x = self.temporal_transformer(x)
-        x = rearrange(x, '(b n) t d -> b t d n', n=n)
-        x = rearrange(x, 'b t d (h w) -> b t d h w', h=self.image_size // self.patch_size, w=self.image_size // self.patch_size)
-
-        if self.sep_output:
-            feat_list = []
-            for i in range(t):
-                feat_list.append(x[:, i, :, :, :])
-            return feat_list
-        else:
-            return x
-
-
-class FSATransformer(nn.Module):
-    """Factorized Self-Attention Transformer Encoder"""
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.):
-        super().__init__()
-        self.layers = nn.ModuleList([])
-        for _ in range(depth):
-            self.layers.append(nn.ModuleList(
-                [PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
-                 PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
-                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
-                 ]))
-
-    def forward(self, x):
-        b, t, n, _ = x.shape
-        x = rearrange(x, 'b t n d -> (b t) n d')
-
-        for sp_attn, temp_attn, ff in self.layers:
-            sp_attn_x = sp_attn(x) + x  # Spatial attention
-
-            # Reshape tensors for temporal attention
-            sp_attn_x = rearrange(sp_attn_x, '(b t) n d -> (b n) t d', n=n, t=t)
-            temp_attn_x = temp_attn(sp_attn_x) + sp_attn_x  # Temporal attention
-            x = ff(temp_attn_x) + temp_attn_x  # MLP
-
-            # Again reshape tensor for spatial attention
-            x = rearrange(x, '(b n) t d -> (b t) n d', n=n, t=t)
-
-        x = rearrange(x, '(b t) n d -> b t d n', t=t, n=n)
-
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = head_dim ** -0.5
+        self.sigmoid = nn.Sigmoid()
+    
+    def forward(self, query, key, value, query2, key2, use_sigmoid):
+        B, N, C = query.shape
+        query = query.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+        key = key.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+        value = value.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+        attn = torch.matmul(query, key.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+            
+        if use_sigmoid:
+            query2 = query2.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+            key2 = key2.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+            attn2 = torch.matmul(query2, key2.transpose(-2, -1)) * self.scale
+            attn2 = torch.sum(attn2, dim=-1)
+            attn2 = self.sigmoid(attn2)
+            attn = attn * attn2.unsqueeze(3) 
+        
+        x = torch.matmul(attn, value).transpose(1, 2).reshape(B, N, C)
         return x
 
+class Block(nn.Module):
 
-class FactorizedVideoTransformer(nn.Module):
-    def __init__(self, image_size, num_frames, dim=256, depth=4, heads=4, in_channels=256, dim_head=64, dropout=0., scale_dim=4, use_temporary_embedding=False, patch_size=1, sep_output=True):
+    def __init__(self, dim, num_heads, mlp_ratio=4., act_layer=nn.GELU, norm_layer=nn.LayerNorm, injection=True):
         super().__init__()
-        self.sep_output = sep_output
-        self.patch_size = patch_size
-        num_patches = (image_size // patch_size) ** 2
-        patch_dim = in_channels * patch_size ** 2
-        self.to_patch_embedding = nn.Sequential(
-            Rearrange('b t c (h p1) (w p2) -> b t (h w) (p1 p2 c)', p1=patch_size, p2=patch_size),
-            nn.Linear(patch_dim, dim),
-        )
 
-        self.image_size = image_size
-        if use_temporary_embedding:
-            self.pos_embedding = nn.Parameter(torch.randn(1, num_frames, num_patches, dim))
+        self.injection = injection
+
+        self.channels = dim
+
+        self.encode_value = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=1, stride=1, padding=0)
+        self.encode_query = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=1, stride=1, padding=0)
+        self.encode_key = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=1, stride=1, padding=0)
+
+        if self.injection:
+            self.encode_query2 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=1, stride=1, padding=0)
+            self.encode_key2 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=1, stride=1, padding=0)
+
+        self.attn = Attention(dim, num_heads=num_heads)
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer)
+        self.q_embedding = nn.Parameter(torch.randn(1, 256, 32, 32))
+        self.k_embedding = nn.Parameter(torch.randn(1, 256, 32, 32))
+
+    def with_pos_embed(self, tensor, pos):
+        return tensor if pos is None else tensor + pos
+
+    def forward(self, query, key, query_embed=None, key_embed=None):
+        b, c, h, w = query.shape
+        query_embed = repeat(self.q_embedding, '() n c d -> b n c d', b = b)
+        key_embed = repeat(self.k_embedding, '() n c d -> b n c d', b = b)
+
+        q_embed = self.with_pos_embed(query, query_embed)
+        k_embed = self.with_pos_embed(key, key_embed)
+
+        v = self.encode_value(key).view(b, self.channels, -1)
+        v = v.permute(0, 2, 1)
+
+        q = self.encode_query(q_embed).view(b, self.channels, -1)
+        q = q.permute(0, 2, 1)
+
+        k = self.encode_key(k_embed).view(b, self.channels, -1)
+        k = k.permute(0, 2, 1)
+        
+        query = query.view(b, self.channels, -1).permute(0, 2, 1)
+
+        if self.injection:
+            q2 = self.encode_query2(q_embed).view(b, self.channels, -1)
+            q2 = q2.permute(0, 2, 1)
+
+            k2 = self.encode_key2(k_embed).view(b, self.channels, -1)
+            k2 = k2.permute(0, 2, 1)
+
+            query = self.attn(query=q, key=k, value=v,query2 = q2, key2 = k2, use_sigmoid=True)
         else:
-            self.pos_embedding = nn.Parameter(torch.randn(1, 1, num_patches, dim))
-        self.transformer = FSATransformer(dim, depth, heads, dim_head, dim * scale_dim, dropout)
+            q2 = None
+            k2 = None
 
-    def forward(self, x):
-        x = self.to_patch_embedding(x)
-        b, t, n, _ = x.shape
+            query = query + self.attn(query=q, key=k, value=v, query2 = q2, key2 = k2, use_sigmoid=False)
+ 
+        query = query + self.mlp(self.norm2(query))
+        query = query.permute(0, 2, 1).contiguous().view(b, self.channels, h, w)
 
-        x += self.pos_embedding[:, :t, :n]
-        x = self.transformer(x)
-        x = rearrange(x, 'b t d (h w) -> b t d h w', h=self.image_size // self.patch_size, w=self.image_size // self.patch_size)
-
-        if self.sep_output:
-            feat_list = []
-            for i in range(t):
-                feat_list.append(x[:, i, :, :, :])
-            return feat_list
-        else:
-            return x
+        return query

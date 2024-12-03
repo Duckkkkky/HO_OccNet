@@ -16,9 +16,9 @@ class ConvHead(nn.Module):
         for i in range(len(feat_dims)-1):
             layers.append(nn.Conv2d(in_channels=feat_dims[i], out_channels=feat_dims[i + 1], kernel_size=kernel, stride=stride, padding=padding))
         # Do not use BN and ReLU for final estimation
-        if i < len(feat_dims) - 2 or (i == len(feat_dims) - 2 and bnrelu_final):
-            layers.append(nn.BatchNorm2d(feat_dims[i + 1]))
-            layers.append(nn.ReLU(inplace=True))
+            if i < len(feat_dims) - 2 or (i == len(feat_dims) - 2 and bnrelu_final):
+                layers.append(nn.BatchNorm2d(feat_dims[i + 1]))
+                layers.append(nn.ReLU(inplace=True))
         self.layers = nn.Sequential(*layers) 
 
     def forward(self, inp):

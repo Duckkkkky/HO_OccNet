@@ -243,7 +243,14 @@ class model(nn.Module):
             with torch.no_grad():
                 input_frames = inputs['img']
                 num_frames = len(input_frames)
-                hand_pose_results_frames = self.pose_model(inputs, metas)
+                # hand_pose_results_frames = self.pose_model(inputs, metas)
+                hand_pose_results_frames = []
+                for i in range(num_frames):
+                    volume_joints_target = targets['hand_joints_3d'][i]    
+                    hand_pose_results = {}
+                    hand_pose_results = ik_solver_mano(None, volume_joints_target[:, :21])
+                    hand_pose_results['volume_joints'] = volume_joints_target
+                    hand_pose_results_frames.append(hand_pose_results)
 
                 sdf_feat_frames, obj_pose_results_frames = [], []
                 for i in range(num_frames):
@@ -257,21 +264,27 @@ class model(nn.Module):
                         volume_joint_preds = decode_volume(cfg, hm_pred, metas['hand_center_3d'][i], metas['cam_intr'][i])
 
                         obj_transform = torch.zeros((input_frames[i].shape[0], 4, 4)).to(input_frames[i].device)
-                        obj_transform[:, :3, 3] = volume_joint_preds.squeeze(1) - metas['hand_center_3d'][i]
+                        # obj_transform[:, :3, 3] = volume_joint_preds.squeeze(1) - metas['hand_center_3d'][i]
+                        obj_transform[:, :3, 3] = targets['obj_center_3d'][i] - metas['hand_center_3d'][i]
                         obj_transform[:, 3, 3] = 1
-                        if self.rot_head is not None:
-                            rot_feat = self.rot_head(backbone_feat.mean(3).mean(2))
-                            if cfg.rot_style == 'axisang':
-                                obj_rot_matrix = batch_rodrigues(rot_feat).view(rot_feat.shape[0], 3, 3)
-                            elif cfg.rot_style == '6d':
-                                obj_rot_matrix = compute_rotation_matrix_from_ortho6d(rot_feat)
-                            obj_transform[:, :3, :3] = obj_rot_matrix
-                            obj_corners_3d = torch.matmul(obj_rot_matrix, metas['obj_rest_corners_3d'][i].transpose(1, 2)).transpose(1, 2)
-                            obj_pose_results['corners'] = obj_corners_3d + volume_joint_preds
+                        # if self.rot_head is not None:
+                        #     rot_feat = self.rot_head(backbone_feat.mean(3).mean(2))
+                        #     if cfg.rot_style == 'axisang':
+                        #         obj_rot_matrix = batch_rodrigues(rot_feat).view(rot_feat.shape[0], 3, 3)
+                        #     elif cfg.rot_style == '6d':
+                        #         obj_rot_matrix = compute_rotation_matrix_from_ortho6d(rot_feat)
+                        #     obj_transform[:, :3, :3] = obj_rot_matrix
+                        #     obj_corners_3d = torch.matmul(obj_rot_matrix, metas['obj_rest_corners_3d'][i].transpose(1, 2)).transpose(1, 2)
+                        #     obj_pose_results['corners'] = obj_corners_3d + volume_joint_preds
+                        if 'obj_transform' in metas:
+                            obj_transform[:, :3, :3] = metas['obj_transform'][i][:, :3, :3]
+                            obj_corners_3d = torch.matmul(obj_transform[:, :3, :3], metas['obj_rest_corners_3d'][i].transpose(1, 2)).transpose(1, 2)
+                            obj_center_3d_expanded = targets['obj_center_3d'][i].unsqueeze(1).repeat(1, 8, 1)
+                            obj_pose_results['corners'] = obj_corners_3d + obj_center_3d_expanded
                         else:
                             obj_transform[:, :3, :3] = torch.eye(3).to(input_frames[i].device)
                         obj_pose_results['global_trans'] = obj_transform
-                        obj_pose_results['center'] = volume_joint_preds
+                        obj_pose_results['center'] = targets['obj_center_3d'][i]
                         obj_pose_results['wrist_trans'] = hand_pose_results_frames[i]['global_trans'][:, 0]
                         obj_pose_results['joints'] = hand_pose_results_frames[i]['volume_joints'] - metas['hand_center_3d'][i].unsqueeze(1)
                     else:

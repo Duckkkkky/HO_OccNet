@@ -163,6 +163,11 @@ class SDFVideoDataset(SDFDataset):
             return input_iter, label_iter, meta_iter
         else:
             hand_center_3d_frames = []
+            hand_samples_frames, obj_samples_frames = [], []
+            if self.hand_branch and self.obj_branch:
+                num_sample_points = self.num_sample_points // 2
+            else:
+                num_sample_points = self.num_sample_points
             for i in range(len(sample_key_frames)):
                 hand_center_3d_frames.append(torch.mm(rot_cam_extr_frames[i], hand_joints_3d_frames[i][:, 0:3].transpose(1, 0)).transpose(1, 0)[0])
                 trans_with_rot = torch.zeros((4, 4))
@@ -170,11 +175,15 @@ class SDFVideoDataset(SDFDataset):
                 trans_with_rot[3, 3] = 1.
                 obj_transform_frames[i] = torch.mm(trans_with_rot, obj_transform_frames[i])
                 obj_transform_frames[i][:3, 3] = obj_transform_frames[i][:3, 3] - hand_center_3d_frames[i]
-
+                hand_samples = torch.zeros((num_sample_points, 5), dtype=torch.float32)
+                obj_samples = torch.zeros((num_sample_points, 5), dtype=torch.float32)
+                hand_samples_frames.append(hand_samples)
+                obj_samples_frames.append(obj_samples)
             input_iter = dict(img=img_frames, masks=video_masks)
+            label_iter = dict(hand_sdf=hand_samples_frames, obj_sdf=obj_samples_frames, hand_joints_3d=hand_joints_3d_frames, obj_center_3d=obj_center_3d_frames, obj_corners_3d=obj_corners_3d_frames)
             meta_iter = dict(cam_intr=cam_intr_frames, cam_extr=cam_extr_frames, id=sample_key_frames, hand_center_3d=hand_center_3d_frames, hand_poses=hand_poses_frames, hand_shapes=hand_shapes_frames, obj_rest_corners_3d=obj_rest_corners_3d_frames, obj_transform=obj_transform_frames)
 
-            return input_iter, meta_iter
+            return input_iter, label_iter, meta_iter
 
 
 if __name__ == "__main__":

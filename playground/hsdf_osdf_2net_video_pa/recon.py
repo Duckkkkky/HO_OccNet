@@ -74,16 +74,17 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
             if cfg.hand_encode_style == 'kine':
                 if cfg.test_with_gt:
                     mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='../common/mano/assets/', use_pca=False, flat_hand_mean=True).cuda()
-                    _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas['hand_poses'], th_betas=metas['hand_shapes'], root_palm=False)
+                    _, joints, _, gt_global_trans, gt_rot_center = mano_layer(metas_frames['hand_poses'][mnt], th_betas=metas_frames['hand_shapes'][mnt], root_palm=False)
                     gt_hand_pose_results = {}
                     gt_hand_pose_results['global_trans'] = gt_global_trans
                     gt_hand_pose_results['rot_center'] = gt_rot_center
+                    gt_hand_pose_results['joints'] = joints[:, 0]
                     hand_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], gt_hand_pose_results, 'hand')
                 else:
                     hand_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], hand_pose_results, 'hand')
             elif cfg.hand_encode_style == 'gt_kine':
                 mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='../common/mano/assets/', use_pca=False, flat_hand_mean=True).cuda()
-                _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas['hand_poses'], th_betas=metas['hand_shapes'], root_palm=False)
+                _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas_frames['hand_poses'][mnt], th_betas=metas_frames['hand_shapes'][mnt], root_palm=False)
                 gt_hand_pose_results = {}
                 gt_hand_pose_results['global_trans'] = gt_global_trans
                 gt_hand_pose_results['rot_center'] = gt_rot_center
@@ -95,22 +96,24 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
             if cfg.obj_encode_style == 'kine':
                 if cfg.test_with_gt:
                     gt_obj_pose_results = {}
-                    gt_obj_pose = metas['obj_transform']
+                    gt_obj_pose = metas_frames['obj_transform'][mnt]
                     if not cfg.obj_rot:
                         gt_obj_pose[:, :3, :3] = torch.eye(3)
                     gt_obj_pose_results['global_trans'] = gt_obj_pose
+                    gt_obj_pose_results['wrist_trans'] = gt_hand_pose_results['global_trans'][:, 0]
+                    gt_obj_pose_results['joints'] = gt_hand_pose_results['joints']
                     obj_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], gt_obj_pose_results, 'obj')
                 else:
                     obj_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], obj_pose_results, 'obj')
             elif cfg.obj_encode_style == 'gt_trans':
                 gt_obj_pose_results = {}
-                gt_obj_pose = metas['obj_transform']
+                gt_obj_pose = metas_frames['obj_transform'][mnt]
                 gt_obj_pose[:, :3, :3] = torch.eye(3)
                 gt_obj_pose_results['global_trans'] = gt_obj_pose
                 obj_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], gt_obj_pose_results, 'obj')
             elif cfg.obj_encode_style == 'gt_transrot':
                 gt_obj_pose_results = {}
-                gt_obj_pose = metas['obj_transform']
+                gt_obj_pose = metas_frames['obj_transform'][mnt]
                 gt_obj_pose_results['global_trans'] = gt_obj_pose
                 obj_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], gt_obj_pose_results, 'obj')
             else:
@@ -167,7 +170,7 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
             if cfg.hand_encode_style == 'kine':
                 if cfg.test_with_gt:
                     mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='../common/mano/assets/', use_pca=False, flat_hand_mean=True).cuda()
-                    _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas['hand_poses'], th_betas=metas['hand_shapes'], root_palm=False)
+                    _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas_frames['hand_poses'][mnt], th_betas=metas_frames['hand_shapes'][mnt], root_palm=False)
                     gt_hand_pose_results = {}
                     gt_hand_pose_results['global_trans'] = gt_global_trans
                     gt_hand_pose_results['rot_center'] = gt_rot_center
@@ -176,7 +179,7 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
                     hand_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], hand_pose_results, 'hand')
             elif cfg.hand_encode_style == 'gt_kine':
                 mano_layer = ManoLayer(ncomps=45, center_idx=0, side="right", mano_root='../common/mano/assets/', use_pca=False, flat_hand_mean=True).cuda()
-                _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas['hand_poses'], th_betas=metas['hand_shapes'], root_palm=False)
+                _, _, _, gt_global_trans, gt_rot_center = mano_layer(metas_frames['hand_poses'][mnt], th_betas=metas_frames['hand_shapes'][mnt], root_palm=False)
                 gt_hand_pose_results = {}
                 gt_hand_pose_results['global_trans'] = gt_global_trans
                 gt_hand_pose_results['rot_center'] = gt_rot_center
@@ -188,7 +191,7 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
             if cfg.obj_encode_style == 'kine':
                 if cfg.test_with_gt:
                     gt_obj_pose_results = {}
-                    gt_obj_pose = metas['obj_transform']
+                    gt_obj_pose = metas_frames['obj_transform'][mnt]
                     if not cfg.obj_rot:
                         gt_obj_pose[:, :3, :3] = torch.eye(3)
                     gt_obj_pose_results['global_trans'] = gt_obj_pose
@@ -197,13 +200,13 @@ def reconstruct(cfg, filename_frames, model, latent_vec_frames, inputs_frames, m
                     obj_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], obj_pose_results, 'obj')
             elif cfg.obj_encode_style == 'gt_trans':
                 gt_obj_pose_results = {}
-                gt_obj_pose = metas['obj_transform']
+                gt_obj_pose = metas_frames['obj_transform'][mnt]
                 gt_obj_pose[:, :3, :3] = torch.eye(3)
                 gt_obj_pose_results['global_trans'] = gt_obj_pose
                 obj_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], gt_obj_pose_results, 'obj')
             elif cfg.obj_encode_style == 'gt_transrot':
                 gt_obj_pose_results = {}
-                gt_obj_pose = metas['obj_transform']
+                gt_obj_pose = metas_frames['obj_transform'][mnt]
                 gt_obj_pose_results['global_trans'] = gt_obj_pose
                 obj_sample_subset = kinematic_embedding(cfg, sample_subset, sample_subset.shape[0], gt_obj_pose_results, 'obj')
             else:
@@ -311,6 +314,14 @@ def convert_sdf_samples_to_ply(sdf_tensor, voxel_origin, voxel_size, is_hand, pl
     """
     sdf_tensor = sdf_tensor.numpy()
     try:
+        # check SDF values
+        if np.isnan(sdf_tensor).any() or np.isinf(sdf_tensor).any():
+            logger.error(f"SDF tensor contains NaN or Inf values for {ply_filename_out}")
+            return None, None, np.array([0,0,0]), np.array([1 / cfg.recon_scale])
+        # check if valid
+        if np.min(sdf_tensor) > 0 or np.max(sdf_tensor) < 0:
+            logger.error(f"No zero-crossing found in SDF for {ply_filename_out}")
+            return None, None, np.array([0,0,0]), np.array([1 / cfg.recon_scale])
         verts, faces, normals, values = skimage.measure.marching_cubes(sdf_tensor, level=0.0, spacing=[voxel_size] * 3)
         with open(os.path.join(cfg.hand_pose_result_dir, '_'.join(ply_filename_out.split('_')[:-1]) + '.json'), 'r') as f:
             data = json.load(f)

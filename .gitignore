@@ -156,3 +156,9 @@ datasets/obman/obman_test.json
 datasets/dexycb/data
 datasets/dexycb/dexycb_train_s0.json
 datasets/dexycb/dexycb_test_s0.json
+datasets/dexycb/dexycb_train_s1.json
+datasets/dexycb/dexycb_test_s1.json
+datasets/dexycb/dexycb_train_s2.json
+datasets/dexycb/dexycb_test_s2.json
+datasets/dexycb/dexycb_train_s3.json
+datasets/dexycb/dexycb_test_s3.json

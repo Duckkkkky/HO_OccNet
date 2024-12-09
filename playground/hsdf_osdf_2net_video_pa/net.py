@@ -59,14 +59,14 @@ class pose_model(nn.Module):
 
 
 class model(nn.Module):
-    def __init__(self, cfg, pose_model, backbone, neck, volume_head, rot_head, hand_sdf_head, obj_sdf_head, feat_transformer):
+    def __init__(self, cfg, pose_model, backbone, neck, volume_head, hand_sdf_head, obj_sdf_head, feat_transformer):
         super(model, self).__init__()
         self.cfg = cfg
         self.pose_model = pose_model
         self.backbone = backbone
         self.neck = neck
         self.volume_head = volume_head
-        self.rot_head = rot_head
+        # self.rot_head = rot_head
         self.dim_backbone_feat = 2048 if self.cfg.backbone_shape == 'resnet_50' else 512
         self.hand_sdf_head = hand_sdf_head
         self.obj_sdf_head = obj_sdf_head
@@ -159,7 +159,8 @@ class model(nn.Module):
                     if 'obj_transform' in metas:
                         obj_transform[:, :3, :3] = metas['obj_transform'][i][:, :3, :3]
                         obj_corners_3d = torch.matmul(obj_transform[:, :3, :3], metas['obj_rest_corners_3d'][i].transpose(1, 2)).transpose(1, 2)
-                        obj_pose_results['corners'] = obj_corners_3d + targets['obj_center_3d'][i]
+                        obj_center_3d_expanded = targets['obj_center_3d'][i].unsqueeze(1).repeat(1, 8, 1)
+                        obj_pose_results['corners'] = obj_corners_3d + obj_center_3d_expanded
                     else:
                         obj_transform[:, :3, :3] = torch.eye(3).to(input_frames[i].device)
                     obj_pose_results['global_trans'] = obj_transform
@@ -231,11 +232,11 @@ class model(nn.Module):
                     loss_obj_frames.append(self.cfg.obj_sdf_weight * self.loss_l1(sdf_obj_frames[i] * mask_obj, sdf_gt_obj_frames[i] * mask_obj) / mask_obj.sum())
                 loss['obj_sdf'] = sum(loss_obj_frames) / num_frames
 
-            if cfg.hand_branch and cfg.obj_branch:
-                loss_volume_frames =[]
-                for i in range(num_frames):
-                    loss_volume_frames.append(self.cfg.volume_weight * self.loss_l2(obj_pose_results_frames[i]['center'], targets['obj_center_3d'][i].unsqueeze(1)))
-                loss['volume_joint'] = sum(loss_volume_frames) / num_frames
+            # if cfg.hand_branch and cfg.obj_branch:
+            #     loss_volume_frames =[]
+            #     for i in range(num_frames):
+            #         loss_volume_frames.append(self.cfg.volume_weight * self.loss_l2(obj_pose_results_frames[i]['center'], targets['obj_center_3d'][i].unsqueeze(1)))
+            #     loss['volume_joint'] = sum(loss_volume_frames) / num_frames
 
             return loss, sdf_results, hand_pose_results_frames, obj_pose_results_frames
         else:
@@ -330,7 +331,7 @@ def get_model(cfg, is_train):
     else:
         obj_sdf_head = None
     
-    ho_model = model(cfg, posenet, backbone_shape, neck_shape, volume_head_obj, rot_head_obj, hand_sdf_head, obj_sdf_head, feat_transformer)
+    ho_model = model(cfg, posenet, backbone_shape, neck_shape, volume_head_obj, hand_sdf_head, obj_sdf_head, feat_transformer)
 
     return ho_model
 

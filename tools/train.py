@@ -194,7 +194,7 @@ def main():
     tester._make_model(local_rank)
 
     with torch.no_grad():
-        for itr, (inputs, metas) in tqdm(enumerate(tester.batch_generator)):
+        for itr, (inputs, targets, metas) in tqdm(enumerate(tester.batch_generator)):
             for k, v in inputs.items():
                 if isinstance(v, list):
                     for i in range(len(v)):
@@ -212,7 +212,7 @@ def main():
 
             # forward
             if cfg.task in ['hsdf_osdf_1net', 'hsdf_osdf_2net', 'hsdf_osdf_2net_pa', 'hsdf_osdf_2net_video_pa']:
-                sdf_feat, hand_pose_results, obj_pose_results = tester.model(inputs, targets=None, metas=metas, mode='test')
+                sdf_feat, hand_pose_results, obj_pose_results = tester.model(inputs, targets=targets, metas=metas, mode='test')
                 export_pose_results(cfg.hand_pose_result_dir, hand_pose_results, metas)
                 export_pose_results(cfg.obj_pose_result_dir, obj_pose_results, metas)
                 from recon import reconstruct

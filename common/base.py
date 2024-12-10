@@ -154,24 +154,29 @@ class Trainer(Base):
         elif cfg.task == 'hsdf_osdf_2net_video_pa' and os.path.exists(cfg.ckpt):
             ckpt = torch.load(cfg.ckpt, map_location=torch.device('cpu'))['network']
             ckpt = {k.replace('module.', ''): v for k, v in ckpt.items()}
-            components = ['pose_model', 'backbone', 'neck', 'volume_head', 'hand_sdf_head', 'obj_sdf_head', 'backbone_2_sdf', 'sdf_encoder']
-            components_ckpts = [{} for i in range(len(components))]
-            for k, v in ckpt.items():
-                for i in range(len(components)):
-                    if k.split('.')[0] == components[i]:
-                        new_key = '.'.join(k.split('.')[1:])
-                        components_ckpts[i][new_key] = v
+            if 'pose_kpt' in cfg.ckpt:
+                model.module.pose_model.load_state_dict(ckpt)
+                self.logger.info('Load pose model from {}'.format(cfg.ckpt))
+                model.module.pose_model.eval()
+            else:   
+                components = ['pose_model', 'backbone', 'neck', 'volume_head', 'hand_sdf_head', 'obj_sdf_head', 'backbone_2_sdf', 'sdf_encoder']
+                components_ckpts = [{} for i in range(len(components))]
+                for k, v in ckpt.items():
+                    for i in range(len(components)):
+                        if k.split('.')[0] == components[i]:
+                            new_key = '.'.join(k.split('.')[1:])
+                            components_ckpts[i][new_key] = v
                 
-            model.module.pose_model.load_state_dict(components_ckpts[0])
-            model.module.backbone.load_state_dict(components_ckpts[1])
-            model.module.neck.load_state_dict(components_ckpts[2])
-            model.module.volume_head.load_state_dict(components_ckpts[3])
-            model.module.hand_sdf_head.load_state_dict(components_ckpts[4])
-            model.module.obj_sdf_head.load_state_dict(components_ckpts[5])
-            model.module.backbone_2_sdf.load_state_dict(components_ckpts[6])
-            model.module.sdf_encoder.load_state_dict(components_ckpts[7])
-            self.logger.info('Load checkpoint from {}'.format(cfg.ckpt))
-            model.module.pose_model.eval()
+                model.module.pose_model.load_state_dict(components_ckpts[0])
+                model.module.backbone.load_state_dict(components_ckpts[1])
+                model.module.neck.load_state_dict(components_ckpts[2])
+                model.module.volume_head.load_state_dict(components_ckpts[3])
+                model.module.hand_sdf_head.load_state_dict(components_ckpts[4])
+                model.module.obj_sdf_head.load_state_dict(components_ckpts[5])
+                model.module.backbone_2_sdf.load_state_dict(components_ckpts[6])
+                model.module.sdf_encoder.load_state_dict(components_ckpts[7])
+                self.logger.info('Load checkpoint from {}'.format(cfg.ckpt))
+                model.module.pose_model.eval()
 
         start_epoch, model, optimizer = self.load_model(model, optimizer)
         self.start_epoch = start_epoch

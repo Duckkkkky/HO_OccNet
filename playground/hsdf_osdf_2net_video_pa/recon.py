@@ -16,7 +16,7 @@ import yaml
 import json
 from loguru import logger
 from config import cfg
-from playground.hsdf_osdf_2net_video_pa.net_old import kinematic_embedding, pixel_align
+from playground.hsdf_osdf_2net_video_pa.net import kinematic_embedding, pixel_align
 from utils.mesh import customized_export_ply
 from utils.solver import icp_ts
 from mano.manolayer import ManoLayer

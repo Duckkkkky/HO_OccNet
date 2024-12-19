@@ -18,3 +18,4 @@ hand_cls_weight: 0.
 end_epoch: 1600
 sdf_add_epoch: 1201
 ckpt: ../outputs/pose_kpt/dexycbs0_100k_resnet18_ocr0_h1_o1_e100_b192_vw1.0/model_dump/snapshot_99.pth.tar
+model_dir: /home/zhouyaqing/HO_OccNet/outputs/hsdf_osdf_2net_video_pa/dexycbs0_29k_nf3_resnet18_resnet18_h1_o1_sdf5_cls0_rot0_hand_kine_51_obj_kine_72_np2000_adf1_fatrans0_e1600_ae1201_scale6.2_b8_hsw0.5_osw0.5_hcw0.0_vw0.5_same_lr/model_dump/

@@ -187,7 +187,7 @@ class Trainer(Base):
         model = model.cuda()
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
         optimizer = self.get_optimizer(model)
-        model = NativeDDP(model, device_ids=[local_rank], output_device=local_rank)
+        model = NativeDDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
         model.train()
 
         if (cfg.task == 'hsdf_osdf_2net' or cfg.task == 'hsdf_osdf_2net_pa') and os.path.exists(cfg.ckpt):
@@ -292,7 +292,7 @@ class Tester(Base):
         self.logger.info("Creating graph...")
         model = get_model(cfg, is_train=False)
         model = model.cuda()
-        model = NativeDDP(model, device_ids=[local_rank], output_device=local_rank)
+        model = NativeDDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
         ckpt = torch.load(model_path)
         model.load_state_dict(ckpt['network'])
         model.eval()

@@ -54,7 +54,7 @@ class Trainer(Base):
         
         if cfg.task == 'pose_kpt':
             param_dicts = [
-            {"params": model_without_ddp.backbone.parameters(), "lr": cfg.lr * 0.1},  # backbone small lr
+            {"params": model_without_ddp.backbone.parameters(), "lr": cfg.lr},  # backbone small lr
             {"params": model_without_ddp.FIT.parameters(), "lr": cfg.lr * 0.5},      # transformer medium lr
             {"params": model_without_ddp.SET.parameters(), "lr": cfg.lr * 0.5},
             {"params": model_without_ddp.downsample.parameters(), "lr": cfg.lr},     # other modules use base lr
@@ -67,7 +67,7 @@ class Trainer(Base):
         elif cfg.task == 'hsdf_osdf_2net_video_pa':
             param_dicts = [
             # backbone related
-            {"params": model_without_ddp.backbone.parameters(), "lr": cfg.lr * 0.1},
+            {"params": model_without_ddp.backbone.parameters(), "lr": cfg.lr},# * 0.1},
             {"params": model_without_ddp.backbone_2_sdf.parameters(), "lr": cfg.lr},
             
             # transformer related
@@ -95,14 +95,28 @@ class Trainer(Base):
         # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=cfg.lr)
         return optimizer
 
-    def save_model(self, state, epoch):
-        file_path = osp.join(cfg.model_dir, 'snapshot_{}.pth.tar'.format(str(epoch)))
+    def save_model(self, state, epoch, is_best=False):
+        if is_best:
+            file_path = osp.join(cfg.model_dir, 'snapshot_best.pth.tar')
+        else:
+            file_path = osp.join(cfg.model_dir, 'snapshot_{}.pth.tar'.format(str(epoch)))
         torch.save(state, file_path)
         self.logger.info("Write snapshot into {}".format(file_path))
 
     def load_model(self, model, optimizer):
         model_file_list = glob.glob(osp.join(cfg.model_dir, '*.pth.tar'))
-        if len(model_file_list) == 0:
+        
+        # if best model exist, load it
+        best_model_path = osp.join(cfg.model_dir, 'snapshot_best.pth.tar')
+        if osp.exists(best_model_path):
+            self.logger.info(f"Found best model at {best_model_path}")
+            ckpt = torch.load(best_model_path, map_location=torch.device('cpu'))
+            self.logger.info('Load best model from {}'.format(best_model_path))
+            start_epoch = ckpt['epoch'] + 1
+            model.load_state_dict(ckpt['network'])
+            optimizer.load_state_dict(ckpt['optimizer'])
+            return start_epoch, model, optimizer
+        elif len(model_file_list) == 0:
             if os.path.exists(cfg.checkpoint):
                 ckpt = torch.load(cfg.checkpoint, map_location=torch.device('cpu'))
                 model.load_state_dict(ckpt['network'])
@@ -120,6 +134,7 @@ class Trainer(Base):
             start_epoch = ckpt['epoch'] + 1
             model.load_state_dict(ckpt['network'])
             optimizer.load_state_dict(ckpt['optimizer'])
+            self.loaded_best_model = True
             self.logger.info('Continue training and load checkpoint from {}'.format(ckpt_path))
             return start_epoch, model, optimizer
 
@@ -284,7 +299,7 @@ class Tester(Base):
         self.batch_generator = DataLoader(dataset=self.testset_loader, batch_size=cfg.test_batch_size, shuffle=False, num_workers=cfg.num_threads, pin_memory=True, drop_last=False, persistent_workers=False)
     
     def _make_model(self, local_rank):
-        model_path = os.path.join(cfg.model_dir, 'snapshot_%d.pth.tar' % self.test_epoch)
+        model_path = os.path.join(cfg.model_dir, f'snapshot_{self.test_epoch}.pth.tar')
         assert os.path.exists(model_path), 'Cannot find model at ' + model_path
         self.logger.info('Load checkpoint from {}'.format(model_path))
         
@@ -293,8 +308,10 @@ class Tester(Base):
         model = get_model(cfg, is_train=False)
         model = model.cuda()
         model = NativeDDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
-        ckpt = torch.load(model_path)
+        ckpt = torch.load(model_path, map_location=torch.device('cpu'))
         model.load_state_dict(ckpt['network'])
+        del ckpt
+        torch.cuda.empty_cache()
         model.eval()
 
         self.model = model

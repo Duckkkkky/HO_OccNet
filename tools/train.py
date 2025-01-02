@@ -6,6 +6,7 @@
 #@Contact :zerui.chen@inria.fr
 
 
+import copy
 import os
 import sys
 import argparse
@@ -20,7 +21,7 @@ from loguru import logger
 import _init_paths
 from _init_paths import add_path, this_dir
 from utils.dir_utils import export_pose_results
-
+from utils.early_stopping_pytorch import EarlyStopping
 
 def sig_handler(signum, frame):
     logger.warning("Signal handler called with signal " + str(signum))
@@ -66,6 +67,11 @@ def parse_args():
 def main():
     # argument parse and create log
     args = parse_args()
+    early_stopping = EarlyStopping(
+        patience=10, 
+        verbose=True,
+        delta=1e-4
+    )
     
     add_path(os.path.join(os.path.dirname(os.path.abspath(args.cfg)), os.pardir))
     from config import cfg, update_config
@@ -111,6 +117,7 @@ def main():
         trainer.read_timer.tic()
         trainer.train_sampler.set_epoch(epoch)
 
+        total_loss = 0
         for itr, (inputs, targets, metas) in enumerate(trainer.batch_generator):
             trainer.set_lr(epoch, itr)
             trainer.read_timer.toc()
@@ -148,6 +155,7 @@ def main():
 
             # backward
             all_loss = sum(loss[k] for k in loss)
+            total_loss += all_loss.item()
             all_loss.backward()
 
             trainer.optimizer.step()
@@ -180,6 +188,27 @@ def main():
             trainer.tot_timer.tic()
             trainer.read_timer.tic()
         
+        avg_loss = total_loss / trainer.itr_per_epoch
+        # early stopping
+        if local_rank == 0:
+            early_stopping(avg_loss)
+            
+            if early_stopping.early_stop:
+                logger.info("Early stopping triggered at epoch %d" % epoch)
+                # save the best model
+                trainer.save_model({
+                    'epoch': epoch,
+                    'network': trainer.model.state_dict(),
+                    'optimizer': trainer.optimizer.state_dict(),
+                }, epoch)
+                break
+            if early_stopping.is_best:
+                trainer.save_model({
+                    'epoch': epoch,
+                    'network': trainer.model.state_dict(),
+                    'optimizer': trainer.optimizer.state_dict(),
+                }, epoch, is_best=True)
+        
         if local_rank == 0 and (epoch % cfg.model_save_freq == 0 or epoch == cfg.end_epoch - 1):
             trainer.save_model({
                 'epoch': epoch,
@@ -189,10 +218,15 @@ def main():
             writer_dict['writer'].close()
         
     torch.cuda.empty_cache()
-    tester = Tester(local_rank, cfg.end_epoch - 1)
-    tester._make_batch_generator()
-    tester._make_model(local_rank)
-
+    best_model_path = os.path.join(cfg.model_dir, 'snapshot_best.pth.tar')
+    if os.path.exists(best_model_path):
+        tester = Tester(local_rank, 'best')
+        tester._make_batch_generator()
+        tester._make_model(local_rank)
+    else:
+        tester = Tester(local_rank, cfg.end_epoch - 1)
+        tester._make_batch_generator()
+        tester._make_model(local_rank)
     with torch.no_grad():
         for itr, (inputs, metas) in tqdm(enumerate(tester.batch_generator)):
             for k, v in inputs.items():

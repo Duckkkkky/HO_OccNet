@@ -155,10 +155,15 @@ datasets/obman/obman_train.json
 datasets/obman/obman_test.json
 datasets/dexycb/data
 datasets/dexycb/dexycb_train_s0.json
+datasets/dexycb/dexycb_train_s0_skip5.json
 datasets/dexycb/dexycb_test_s0.json
+datasets/dexycb/dexycb_test_s0_skip5.json
 datasets/dexycb/dexycb_train_s1.json
 datasets/dexycb/dexycb_test_s1.json
 datasets/dexycb/dexycb_train_s2.json
 datasets/dexycb/dexycb_test_s2.json
 datasets/dexycb/dexycb_train_s3.json
 datasets/dexycb/dexycb_test_s3.json
+datasets/dexycb/dexycb_train_s2_full.json
+preprocess/cocoify_dexycb.py
+datasets/dexycb/splits/s2_train.json

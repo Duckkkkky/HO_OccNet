@@ -54,9 +54,9 @@ def preprocess(data_root='../datasets/dexycb', split='s0', mode='test', side='ri
 
             if sample['mano_side'] in side:
                 img_path = sample['color_file']
-                subject = int(img_path.split('/')[6].split('-')[-1])
-                video_id = img_path.split('/')[7]
-                sub_video_id = img_path.split('/')[8]
+                subject = int(img_path.split('/')[11].split('-')[-1])
+                video_id = img_path.split('/')[12]
+                sub_video_id = img_path.split('/')[13]
                 frame_idx = int(img_path.split('/')[-1].split('_')[-1].split('.')[0])
 
                 if frame_idx % 5 != 0:

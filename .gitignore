@@ -162,3 +162,7 @@ datasets/dexycb/dexycb_train_s2.json
 datasets/dexycb/dexycb_test_s2.json
 datasets/dexycb/dexycb_train_s3.json
 datasets/dexycb/dexycb_test_s3.json
+datasets/dexycb/dexycb_test_s0_skip5.json
+datasets/dexycb/dexycb_train_s0_skip5.json
+datasets/dexycb/dexycb_train_s2_full.json
+datasets/dexycb/splits/s2_train.json

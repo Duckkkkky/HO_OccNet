@@ -29,7 +29,7 @@ from datasets.dexycb.toolkit.factory import get_dataset
 from datasets.dexycb.toolkit.dex_ycb import _SUBJECTS, _SERIALS
 
 
-def preprocess(data_root='../datasets/dexycb', split='s0', mode='test', side='right'):
+def preprocess(data_root='../datasets/dexycb', split='s0', mode='train', side='right'):
     sdf_data_root = os.path.join(data_root, 'data', 'sdf_data')
     if mode == 'test':
         hand_mesh_data_root = os.path.join(data_root, 'data', 'mesh_data', 'mesh_hand')
@@ -45,6 +45,9 @@ def preprocess(data_root='../datasets/dexycb', split='s0', mode='test', side='ri
         coco_file = dict()
         data_images = []
         data_annos = []
+        
+        current_video_id = None
+        current_video_frames = []
 
         for i in tqdm(range(len(dataset))):
             sample = dataset[i]
@@ -59,8 +62,21 @@ def preprocess(data_root='../datasets/dexycb', split='s0', mode='test', side='ri
                 sub_video_id = img_path.split('/')[8]
                 frame_idx = int(img_path.split('/')[-1].split('_')[-1].split('.')[0])
 
-                if frame_idx % 5 != 0:
-                    continue
+                
+                if current_video_id != (video_id, sub_video_id):
+                    if current_video_frames:
+                        frames_to_discard = len(current_video_frames) % 3
+                        current_video_frames = current_video_frames[:-frames_to_discard]
+                        
+                        for frame in current_video_frames:
+                            data_images.append(frame['img_info'])
+                            data_annos.append(frame['anno_info'])
+                            selected_ids.append(str(sample_id).rjust(8, '0'))
+                            
+                    current_video_id = (video_id, sub_video_id)
+                    current_video_frames = []
+                # if frame_idx % 5 != 0:
+                #     continue
 
                 img_info['id'] = sample_id
                 img_info['file_name'] = '_'.join([str(subject), video_id, sub_video_id, str(frame_idx)])
@@ -134,9 +150,14 @@ def preprocess(data_root='../datasets/dexycb', split='s0', mode='test', side='ri
                         hand_mesh.export(os.path.join(hand_mesh_data_root, mesh_filename))
                         obj_mesh.export(os.path.join(obj_mesh_data_root, mesh_filename))
                     
-                    selected_ids.append(str(sample_id).rjust(8, '0'))
-                    data_images.append(img_info)
-                    data_annos.append(anno_info)
+                    current_video_frames.append({'img_info': img_info, 'anno_info': anno_info})
+        # 处理最后一个视频帧
+        if current_video_frames:
+            frames_to_discard = len(current_video_frames) % 3
+            current_video_frames = current_video_frames[:-frames_to_discard]
+            for frame in current_video_frames:
+                data_images.append(frame['img_info'])
+                data_annos.append(frame['anno_info'])
 
         coco_file['images'] = data_images
         coco_file['annotations'] = data_annos
@@ -380,5 +401,5 @@ def general_sdf_folder(opt):
 
 
 if __name__ == '__main__':
-    # Fire(preprocess)
-    Fire(create_lmdb)
+    Fire(preprocess)
+    # Fire(create_lmdb)

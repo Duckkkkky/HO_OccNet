@@ -1,8 +1,8 @@
 trainset_3d: dexycb
-trainset_3d_split: s0_29k
+trainset_3d_split: s0_148k
 testset: dexycb
-testset_split: s0_5k
-num_testset_samples: 5928
+testset_split: s0_29k
+num_testset_samples: 29464
 hand_branch: True
 obj_branch: False
 obj_rot: False

@@ -1,7 +1,9 @@
 trainset_3d: dexycb
-trainset_3d_split: s0_29k
+trainset_3d_split: s0_148k
 testset: dexycb
-testset_split: s0_5k
+testset_split: s0_29k
+num_testset_samples: 29464
+num_testset_videos: 9822
 testset_hand_source: dexycb/data/mesh_data/mesh_hand/
 testset_obj_source: dexycb/data/mesh_data/mesh_obj/
 recon_scale: 6.2

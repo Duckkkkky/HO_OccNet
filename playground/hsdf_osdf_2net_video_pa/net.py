@@ -12,7 +12,7 @@ import time
 from torch.nn import functional as F
 from config import cfg
 from networks.backbones.resnet import ResNetBackbone
-from networks.backbones.transformer import VideoTransformer, FactorizedVideoTransformer
+from networks.backbones.transformer import VideoTransformer, FactorizedVideoTransformer, ILAVideoTransformer
 from networks.necks.unet import UNet
 from networks.heads.sdf_head import SDFHead
 from networks.heads.mano_head import ManoHead
@@ -304,7 +304,7 @@ def get_model(cfg, is_train):
     if cfg.fa_trans:
         feat_transformer = FactorizedVideoTransformer(image_size=16, num_frames=cfg.num_frames, depth=8, dim_head=256)
     else:
-        feat_transformer = VideoTransformer(image_size=16, num_frames=cfg.num_frames, depth=8, dim_head=256)
+        feat_transformer = ILAVideoTransformer(image_size=16, num_frames=cfg.num_frames, depth=8, dim_head=256)
 
     if cfg.hand_branch:
         hand_sdf_head = SDFHead(cfg.sdf_latent, cfg.hand_point_latent, cfg.sdf_head['dims'], cfg.sdf_head['dropout'], cfg.sdf_head['dropout_prob'], cfg.sdf_head['norm_layers'], cfg.sdf_head['latent_in'], cfg.hand_cls, cfg.sdf_head['num_class'])

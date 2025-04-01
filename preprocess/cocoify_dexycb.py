@@ -46,8 +46,6 @@ def preprocess(data_root='../datasets/dexycb', split='s0', mode='train', side='r
         data_images = []
         data_annos = []
         
-        current_video_id = None
-        current_video_frames = []
 
         for i in tqdm(range(len(dataset))):
             sample = dataset[i]
@@ -63,18 +61,6 @@ def preprocess(data_root='../datasets/dexycb', split='s0', mode='train', side='r
                 frame_idx = int(img_path.split('/')[-1].split('_')[-1].split('.')[0])
 
                 
-                if current_video_id != (video_id, sub_video_id):
-                    if current_video_frames:
-                        frames_to_discard = len(current_video_frames) % 3
-                        current_video_frames = current_video_frames[:-frames_to_discard]
-                        
-                        for frame in current_video_frames:
-                            data_images.append(frame['img_info'])
-                            data_annos.append(frame['anno_info'])
-                            selected_ids.append(str(sample_id).rjust(8, '0'))
-                            
-                    current_video_id = (video_id, sub_video_id)
-                    current_video_frames = []
                 # if frame_idx % 5 != 0:
                 #     continue
 
@@ -150,14 +136,9 @@ def preprocess(data_root='../datasets/dexycb', split='s0', mode='train', side='r
                         hand_mesh.export(os.path.join(hand_mesh_data_root, mesh_filename))
                         obj_mesh.export(os.path.join(obj_mesh_data_root, mesh_filename))
                     
-                    current_video_frames.append({'img_info': img_info, 'anno_info': anno_info})
-        # 处理最后一个视频帧
-        if current_video_frames:
-            frames_to_discard = len(current_video_frames) % 3
-            current_video_frames = current_video_frames[:-frames_to_discard]
-            for frame in current_video_frames:
-                data_images.append(frame['img_info'])
-                data_annos.append(frame['anno_info'])
+                    selected_ids.append(str(sample_id).rjust(8, '0'))
+                    data_images.append(img_info)
+                    data_annos.append(anno_info)
 
         coco_file['images'] = data_images
         coco_file['annotations'] = data_annos

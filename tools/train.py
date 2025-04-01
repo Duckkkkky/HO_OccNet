@@ -7,6 +7,7 @@
 
 
 import os
+import psutil
 import sys
 import argparse
 from tqdm import tqdm
@@ -22,6 +23,14 @@ from _init_paths import add_path, this_dir
 from utils.dir_utils import export_pose_results
 
 
+def get_process_memory():
+    """获取当前进程的内存使用情况"""
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    return mem_info.rss / 1024**2  # 转换为MB
+
+
+    
 def sig_handler(signum, frame):
     logger.warning("Signal handler called with signal " + str(signum))
     prod_id = int(os.environ['SLURM_PROCID'])
@@ -100,8 +109,25 @@ def main():
         writer_dict = {'writer': SummaryWriter(log_dir = cfg.log_dir), 'train_global_steps': 0}
 
     trainer = Trainer()
+    
+    if cfg.enable_pruning:
+        prune_configs = {
+            'backbone': {'threshold': 0.0005},
+            'pose_model': {'threshold': 0.001},
+            'hand_sdf_head': {'threshold': 0.0002, 'excluded_layers': ['last_layer']},
+            'obj_sdf_head': {'threshold': 0.0002, 'excluded_layers': ['last_layer']},
+            'feat_transformer': {'threshold': 0.0005},
+            'prune_frequency': cfg.prune_frequency if hasattr(cfg, 'prune_frequency') else 200,
+            'splice_frequency': cfg.splice_frequency if hasattr(cfg, 'splice_frequency') else 500
+        }
+    else:
+        prune_configs = None
+
     trainer._make_batch_generator()
     trainer._make_model(local_rank)
+    
+    if prune_configs is not None:
+        trainer.setup_pruning(prune_configs)
 
     if args.slurm:
         init_signal_handler()
@@ -141,7 +167,7 @@ def main():
 
             # forward
             trainer.optimizer.zero_grad()
-            if cfg.task in ['hsdf_osdf_1net', 'hsdf_osdf_2net', 'hsdf_osdf_2net_pa', 'hsdf_osdf_2net_video_pa']:
+            if cfg.task in ['hsdf_osdf_1net', 'hsdf_osdf_1net_video', 'hsdf_osdf_2net', 'hsdf_osdf_2net_pa', 'hsdf_osdf_2net_video_pa']:
                 loss, sdf_results, hand_pose_results, obj_pose_results = trainer.model(inputs, targets, metas, 'train')
             elif cfg.task == 'pose_kpt':
                 loss, hand_pose_results, obj_pose_results = trainer.model(inputs, targets, metas, 'train')
@@ -152,6 +178,9 @@ def main():
 
             trainer.optimizer.step()
             torch.cuda.synchronize()
+            
+            if prune_configs is not None:
+                trainer.pruning_hook.after_step()
 
             trainer.gpu_timer.toc()
             screen = [
@@ -175,6 +204,12 @@ def main():
                         tb_writer.add_scalar('loss_' + k, v, global_steps)
                     tb_writer.add_scalar('lr', trainer.get_lr(), global_steps)
                     writer_dict['train_global_steps'] = global_steps + 10
+                
+                if prune_configs is not None and itr % 100 == 0:
+                    stats = trainer.pruner.get_prune_statistics()
+                    logger.info(f"Overall pruning ratio: {stats['overall']*100:.2f}%")
+                    mem_usage = get_process_memory()
+                    logger.info(f"进程内存使用: {mem_usage:.2f} MB")
 
             trainer.tot_timer.toc()
             trainer.tot_timer.tic()
@@ -211,13 +246,15 @@ def main():
                         metas[k] = metas[k].cuda(non_blocking=True)
 
             # forward
-            if cfg.task in ['hsdf_osdf_1net', 'hsdf_osdf_2net', 'hsdf_osdf_2net_pa', 'hsdf_osdf_2net_video_pa']:
+            if cfg.task in ['hsdf_osdf_1net', 'hsdf_osdf_1net_video', 'hsdf_osdf_2net', 'hsdf_osdf_2net_pa', 'hsdf_osdf_2net_video_pa']:
                 sdf_feat, hand_pose_results, obj_pose_results = tester.model(inputs, targets=None, metas=metas, mode='test')
                 export_pose_results(cfg.hand_pose_result_dir, hand_pose_results, metas)
                 export_pose_results(cfg.obj_pose_result_dir, obj_pose_results, metas)
                 from recon import reconstruct
                 if cfg.task == 'hsdf_osdf_2net_pa' or cfg.task == 'hsdf_osdf_2net_video_pa':
                     reconstruct(cfg, metas['id'], tester.model, sdf_feat, inputs, metas, hand_pose_results, obj_pose_results)
+                elif cfg.task == 'hsdf_osdf_1net_video':
+                    reconstruct(cfg, metas['id'], tester.model, sdf_feat, metas, hand_pose_results, obj_pose_results)
                 else:
                     reconstruct(cfg, metas['id'], tester.model.module.hand_sdf_head, tester.model.module.obj_sdf_head, sdf_feat, metas, hand_pose_results, obj_pose_results)
             elif cfg.task == 'pose_kpt':

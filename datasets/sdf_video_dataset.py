@@ -106,32 +106,38 @@ class SDFVideoDataset(SDFDataset):
             else:
                 num_sample_points = self.num_sample_points
         
-            hand_samples_frames, obj_samples_frames = [], []
+            hand_samples_frames, obj_samples_frames, hand_labels_frames, obj_labels_frames = [], [], [], []
             # get points to train sdf
             for i in range(len(sample_key_frames)):
                 if self.hand_branch:
                     if self.use_lmdb:
-                        hand_samples, _ = self.unpack_sdf_lmdb(self.hand_env, sample_key_frames[i], self.hand_meta, num_sample_points, hand=True, clamp=self.clamp, filter_dist=True)
+                        hand_samples, hand_labels = self.unpack_sdf_lmdb(self.hand_env, sample_key_frames[i], self.hand_meta, num_sample_points, hand=True, clamp=self.clamp, filter_dist=True)
                     else:
-                        hand_samples, _ = self.unpack_sdf(sdf_hand_path_frames[i], num_sample_points, hand=True, clamp=self.clamp, filter_dist=True)
+                        hand_samples, hand_labels = self.unpack_sdf(sdf_hand_path_frames[i], num_sample_points, hand=True, clamp=self.clamp, filter_dist=True)
                     hand_samples[:, 0:3] = hand_samples[:, 0:3] / sdf_scale_frames[i] - sdf_offset_frames[i]
+                    hand_labels = hand_labels.long()
                     if 'ho3d' in self.dataset_name:
                         hand_samples[:, 1:3] *= -1
                 else:
                     hand_samples = torch.zeros((num_sample_points, 5), dtype=torch.float32)
+                    hand_labels = -1. * torch.ones(num_sample_points, dtype=torch.int32)
                 hand_samples_frames.append(hand_samples)
+                hand_labels_frames.append(hand_labels)
 
                 if self.obj_branch:
                     if self.use_lmdb:
-                        obj_samples, _ = self.unpack_sdf_lmdb(self.obj_env, sample_key_frames[i], self.obj_meta, num_sample_points, hand=False, clamp=self.clamp, filter_dist=True)
+                        obj_samples, obj_labels = self.unpack_sdf_lmdb(self.obj_env, sample_key_frames[i], self.obj_meta, num_sample_points, hand=False, clamp=self.clamp, filter_dist=True)
                     else:
-                        obj_samples, _ = self.unpack_sdf(sdf_obj_path_frames[i], num_sample_points, hand=False, clamp=self.clamp, filter_dist=True)
+                        obj_samples, obj_labels = self.unpack_sdf(sdf_obj_path_frames[i], num_sample_points, hand=False, clamp=self.clamp, filter_dist=True)
                     obj_samples[:, 0:3] = obj_samples[:, 0:3] / sdf_scale_frames[i] - sdf_offset_frames[i]
+                    obj_labels = obj_labels.long()
                     if 'ho3d' in self.dataset_name:
                         obj_samples[:, 1:3] *= -1
                 else:
                     obj_samples = torch.zeros((num_sample_points, 5), dtype=torch.float32)
+                    obj_labels = -1. * torch.ones(num_sample_points, dtype=torch.int32)
                 obj_samples_frames.append(obj_samples)
+                obj_labels_frames.append(obj_labels)
 
             hand_center_3d_frames = []
             for i in range(len(sample_key_frames)):
@@ -157,7 +163,7 @@ class SDFVideoDataset(SDFDataset):
                 obj_samples_frames[i][:, 0:5] = obj_samples_frames[i][:, 0:5] / 2
 
             input_iter = dict(img=img_frames, masks=video_masks)
-            label_iter = dict(hand_sdf=hand_samples_frames, obj_sdf=obj_samples_frames, hand_joints_3d=hand_joints_3d_frames, obj_center_3d=obj_center_3d_frames, obj_corners_3d=obj_corners_3d_frames)
+            label_iter = dict(hand_sdf=hand_samples_frames, hand_labels=hand_labels_frames, obj_sdf=obj_samples_frames, obj_labels=obj_labels_frames, hand_joints_3d=hand_joints_3d_frames, obj_center_3d=obj_center_3d_frames, obj_corners_3d=obj_corners_3d_frames)
             meta_iter = dict(cam_intr=cam_intr_frames, cam_extr=cam_extr_frames, id=sample_key_frames, hand_center_3d=hand_center_3d_frames, hand_poses=hand_poses_frames, hand_shapes=hand_shapes_frames, obj_rest_corners_3d=obj_rest_corners_3d_frames, obj_transform=obj_transform_frames)
 
             return input_iter, label_iter, meta_iter

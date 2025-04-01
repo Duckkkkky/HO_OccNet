@@ -15,7 +15,7 @@ from contextlib import redirect_stdout
 
 cfg = CN()
 
-cfg.task = 'hsdf_osdf_2net_pa'
+cfg.task = 'hsdf_osdf_1net_video'
 cfg.cur_dir = osp.dirname(os.path.abspath(__file__))
 cfg.root_dir = osp.join(cfg.cur_dir, '..', '..')
 cfg.data_dir = osp.join(cfg.root_dir, 'datasets')
@@ -27,8 +27,8 @@ cfg.result_dir = './result'
 cfg.sdf_result_dir = '.'
 cfg.cls_sdf_result_dir = '.'
 cfg.hand_pose_result_dir = '.'
+cfg.optim_hand_pose_result_dir = '.'
 cfg.obj_pose_result_dir = '.'
-cfg.ckpt = '.'
 
 ## dataset
 cfg.trainset_3d = 'obman'
@@ -38,27 +38,36 @@ cfg.testset_split = '6k'
 cfg.testset_hand_source = osp.join(cfg.testset, 'data/test/mesh_hand')
 cfg.testset_obj_source = osp.join(cfg.testset, 'data/test/mesh_obj')
 cfg.num_testset_samples = 6285
+cfg.num_testset_videos = 2184
 cfg.mesh_resolution = 128
-cfg.point_batch_size = 2 ** 18
+cfg.point_batch_size = 2 ** 16
 cfg.output_part_label = False
 cfg.vis_part_label = False
 cfg.chamfer_optim = True
 
 ## model setting
-cfg.backbone_pose = 'resnet_18'
-cfg.backbone_shape = 'resnet_18'
+cfg.backbone = 'resnet_18'
 cfg.mano_pca_latent = 15
 cfg.sdf_latent = 256
 cfg.hand_point_latent = 3
 cfg.obj_point_latent = 3
 cfg.hand_encode_style = 'nerf'
 cfg.obj_encode_style = 'nerf'
-cfg.rot_style = '6d'
+cfg.rot_format = 'axisang'
 cfg.hand_branch = True
 cfg.obj_branch = True
 cfg.hand_cls = False
+cfg.mano_branch = False
+cfg.mano_depth = False
+cfg.obj_trans = False
 cfg.obj_rot = False
 cfg.with_add_feats = True
+cfg.fa_trans = False
+
+# pruning config
+cfg.enable_pruning = False
+cfg.prune_frequency = 40
+cfg.splice_frequency = 30
 
 cfg.sdf_head = CN()
 cfg.sdf_head.layers = 5
@@ -74,31 +83,33 @@ cfg.image_size = (256, 256)
 cfg.heatmap_size = (64, 64, 64)
 cfg.depth_dim = 0.28
 cfg.warm_up_epoch = 0
-cfg.lr_dec_epoch = [600, 1200]
-cfg.end_epoch = 1600
-cfg.sdf_add_epoch = 1201
+# cfg.lr_dec_epoch = [600, 1200]
+cfg.lr_dec_epoch = [1800, 3600]
+cfg.end_epoch = 4500
+cfg.sdf_add_epoch = 3601
+cfg.pose_epoch = 0
 cfg.lr = 1e-4
 cfg.lr_dec_style = 'step'
 cfg.lr_dec_factor = 0.5
-cfg.train_batch_size = 64
+cfg.train_batch_size = 16
 cfg.num_sample_points = 2000
 cfg.clamp_dist = 0.05
 cfg.recon_scale = 6.5
 cfg.hand_sdf_weight = 0.5
 cfg.obj_sdf_weight = 0.5
 cfg.hand_cls_weight = 0.05
+cfg.mano_joints_weight = 0.5
+cfg.mano_shape_weight = 5e-7
+cfg.mano_pose_weight = 5e-5
 cfg.volume_weight = 0.5
-cfg.corner_weight = 0.5
+cfg.corner_weight = 0.2
 cfg.use_inria_aug = False
-cfg.norm_factor = 0.02505871
-
-cfg.enable_pruning = False
-cfg.prune_frequency = 100
-cfg.splice_frequency = 100
+cfg.num_frames = 3
 
 ## testing config
 cfg.test_batch_size = 1
 cfg.test_with_gt = False
+cfg.use_whole_video_test = False
 
 ## others
 cfg.use_lmdb = False
@@ -118,7 +129,7 @@ def update_config(cfg, args, mode='train'):
     logger.info('>>> Using GPU: {}'.format(cfg.gpu_ids))
 
     if mode == 'train':
-        exp_info = [cfg.trainset_3d + cfg.trainset_3d_split, cfg.backbone_pose.replace('_', ''), cfg.backbone_shape.replace('_', ''), 'h' + str(int(cfg.hand_branch)), 'o' + str(int(cfg.obj_branch)), 'sdf' + str(cfg.sdf_head.layers), 'cls' + str(int(cfg.hand_cls)), 'rot' + str(int(cfg.obj_rot)), 'hand_' + cfg.hand_encode_style + '_' + str(cfg.hand_point_latent), 'obj_' + cfg.obj_encode_style + '_' + str(cfg.obj_point_latent), 'np' + str(cfg.num_sample_points), 'adf' + str(int(cfg.with_add_feats)), 'e' + str(cfg.end_epoch), 'ae' + str(cfg.sdf_add_epoch), 'scale' + str(cfg.recon_scale), 'b' + str(cfg.num_gpus * cfg.train_batch_size), 'hsw' + str(cfg.hand_sdf_weight), 'osw' + str(cfg.obj_sdf_weight), 'hcw' + str(cfg.hand_cls_weight), 'vw' + str(cfg.volume_weight)]
+        exp_info = [cfg.trainset_3d + cfg.trainset_3d_split, cfg.backbone.replace('_', ''), 'h' + str(int(cfg.hand_branch)), 'o' + str(int(cfg.obj_branch)), 'sdf' + str(cfg.sdf_head.layers), 'cls' + str(int(cfg.hand_cls)), 'mano' + str(int(cfg.mano_branch)), 'd' + str(int(cfg.mano_depth)), 'ot' + str(int(cfg.obj_trans)), 'or' + str(int(cfg.obj_rot)), 'hand_' + cfg.hand_encode_style + '_' + str(cfg.hand_point_latent), 'obj_' + cfg.obj_encode_style + '_' + str(cfg.obj_point_latent), 'np' + str(cfg.num_sample_points), 'e' + str(cfg.end_epoch), 'ae' + str(cfg.sdf_add_epoch), 'pe' + str(cfg.pose_epoch), 'scale' + str(cfg.recon_scale), 'b' + str(cfg.num_gpus * cfg.train_batch_size), 'hsw' + str(cfg.hand_sdf_weight), 'osw' + str(cfg.obj_sdf_weight), 'hcw' + str(cfg.hand_cls_weight), 'mjw' + str(cfg.mano_joints_weight), 'msw' + str(cfg.mano_shape_weight), 'mpw' + str(cfg.mano_pose_weight), 'vw' + str(cfg.volume_weight), 'ocrw' + str(cfg.corner_weight)]
 
         cfg.output_dir = osp.join(cfg.root_dir, 'outputs', cfg.task, '_'.join(exp_info))
         cfg.model_dir = osp.join(cfg.output_dir, 'model_dump')
@@ -127,8 +138,9 @@ def update_config(cfg, args, mode='train'):
         cfg.result_dir = osp.join(cfg.output_dir, '_'.join(['result', cfg.testset, 'gt', str(int(cfg.test_with_gt))]))
         cfg.sdf_result_dir = osp.join(cfg.result_dir, 'sdf_mesh')
         cfg.cls_sdf_result_dir = osp.join(cfg.result_dir, 'hand_cls')
-        cfg.hand_pose_result_dir = osp.join(cfg.result_dir, 'hand_pose')
-        cfg.obj_pose_result_dir = osp.join(cfg.result_dir, 'obj_pose')
+        cfg.hand_pose_result_dir = os.path.join(cfg.result_dir, 'hand_pose')
+        cfg.optim_hand_pose_result_dir = os.path.join(cfg.result_dir, 'optim_hand_pose')
+        cfg.obj_pose_result_dir = os.path.join(cfg.result_dir, 'obj_pose')
 
         os.makedirs(cfg.output_dir, exist_ok=True)
         os.makedirs(cfg.model_dir, exist_ok=True)
@@ -138,6 +150,7 @@ def update_config(cfg, args, mode='train'):
         os.makedirs(cfg.sdf_result_dir, exist_ok=True)
         os.makedirs(cfg.cls_sdf_result_dir, exist_ok=True)
         os.makedirs(cfg.hand_pose_result_dir, exist_ok=True)
+        os.makedirs(cfg.optim_hand_pose_result_dir, exist_ok=True)
         os.makedirs(cfg.obj_pose_result_dir, exist_ok=True)
 
         cfg.freeze()
@@ -149,12 +162,14 @@ def update_config(cfg, args, mode='train'):
         cfg.sdf_result_dir = osp.join(cfg.result_dir, 'sdf_mesh')
         cfg.cls_sdf_result_dir = osp.join(cfg.result_dir, 'hand_cls')
         cfg.hand_pose_result_dir = os.path.join(cfg.result_dir, 'hand_pose')
+        cfg.optim_hand_pose_result_dir = os.path.join(cfg.result_dir, 'optim_hand_pose')
         cfg.obj_pose_result_dir = os.path.join(cfg.result_dir, 'obj_pose')
         os.makedirs(cfg.result_dir, exist_ok=True)
         os.makedirs(cfg.log_dir, exist_ok=True)
         os.makedirs(cfg.sdf_result_dir, exist_ok=True)
         os.makedirs(cfg.cls_sdf_result_dir, exist_ok=True)
         os.makedirs(cfg.hand_pose_result_dir, exist_ok=True)
+        os.makedirs(cfg.optim_hand_pose_result_dir, exist_ok=True)
         os.makedirs(cfg.obj_pose_result_dir, exist_ok=True)
 
         cfg.freeze()

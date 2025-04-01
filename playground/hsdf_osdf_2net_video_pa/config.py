@@ -62,6 +62,11 @@ cfg.obj_rot = False
 cfg.with_add_feats = True
 cfg.fa_trans = False
 
+# pruning config
+cfg.enable_pruning = False
+cfg.prune_frequency = 40
+cfg.splice_frequency = 30
+
 cfg.sdf_head = CN()
 cfg.sdf_head.layers = 5
 cfg.sdf_head.dims = [512 for i in range(cfg.sdf_head.layers - 1)]

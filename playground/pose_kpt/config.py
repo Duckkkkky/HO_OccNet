@@ -61,6 +61,11 @@ cfg.use_inria_aug = False
 cfg.norm_coords = False
 cfg.norm_factor = 0.02505871
 
+# pruning config
+cfg.enable_pruning = False
+cfg.prune_frequency = 40
+cfg.splice_frequency = 30
+
 ## testing config
 cfg.test_batch_size = 1
 

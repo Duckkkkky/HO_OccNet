@@ -19,16 +19,47 @@ def pixel_align(cfg, input_xyz_points, num_points_per_scene, feature_maps, hand_
     homo_xyz_2d = torch.matmul(cam_intr, homo_xyz.transpose(1, 2)).transpose(1, 2)
     xyz_2d = (homo_xyz_2d[:, :, :2] / homo_xyz_2d[:, :, [2]]).unsqueeze(2)
     uv_2d = xyz_2d / cfg.image_size[0] * 2 - 1
+    uv_2d_new = uv_2d
     sample_feat = torch.nn.functional.grid_sample(feature_maps, uv_2d, align_corners=True)[:, :, :, 0].transpose(1, 2)
     uv_2d = uv_2d.squeeze(2).reshape((-1, 2))
     sample_feat = sample_feat.reshape((uv_2d.shape[0], -1))
     validity = (uv_2d[:, 0] >= -1.0) & (uv_2d[:, 0] <= 1.0) & (uv_2d[:, 1] >= -1.0) & (uv_2d[:, 1] <= 1.0)
     validity = validity.unsqueeze(1)
-
+    
+    # # 使用两个分支预测均值和标准差
+    # # uv_2d = uv_2d.reshape(batch_size, num_points_per_scene, 1, 2)
+    # sample_feat_mu = torch.nn.functional.grid_sample(
+    #     feature_maps,
+    #     uv_2d_new,
+    #     align_corners=True
+    # )[:, :, :, 0].transpose(1, 2)
+    
+    # # 添加不确定性预测分支
+    # uncertainty_maps = feature_maps.clone() # 使用单独特征图
+    # sample_feat_sigma = torch.nn.functional.grid_sample(
+    #     uncertainty_maps,
+    #     uv_2d_new,
+    #     align_corners=True
+    # )[:, :, :, 0].transpose(1, 2)
+    
+    # # 确保标准差为正
+    # sample_feat_sigma = torch.nn.functional.softplus(sample_feat_sigma) + 1e-8
+    
+    # # 使用重参数化采样
+    # eps = torch.randn_like(sample_feat_mu)
+    # sample_feat = sample_feat_mu + eps * sample_feat_sigma
+    # sample_feat = sample_feat.reshape((uv_2d.shape[0], -1))
+    
     if cfg.with_add_feats:
         depth_feat = xyz.reshape((-1, 3))[:, [-1]]
         view_dir_feat = F.normalize(xyz.reshape((-1, 3)), p=2, dim=1)
-        sample_feat = torch.cat([sample_feat, depth_feat, view_dir_feat], axis=1)
+        # sample_feat = torch.cat([sample_feat, depth_feat, view_dir_feat], axis=1)
+        # 合并特征和不确定性信息
+        sample_feat = torch.cat(
+            [sample_feat, depth_feat, view_dir_feat],
+            dim=1
+        )
+    
 
     return sample_feat, validity
 

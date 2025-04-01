@@ -19,6 +19,7 @@ from net import get_model
 from datasets.sdf_dataset import SDFDataset
 from datasets.sdf_video_dataset import SDFVideoDataset
 from datasets.pose_dataset import PoseDataset
+import torch.nn as nn
 
 
 class Base(object):
@@ -126,7 +127,7 @@ class Trainer(Base):
 
             if cfg.task == 'hsdf_osdf_1net' or cfg.task == 'hsdf_osdf_2net' or cfg.task == 'hsdf_osdf_2net_pa':
                 self.trainset_loader = SDFDataset(trainset3d_db, cfg=cfg)
-            elif cfg.task == 'hsdf_osdf_2net_video_pa':
+            elif cfg.task == 'hsdf_osdf_2net_video_pa' or cfg.task == 'hsdf_osdf_1net_video':
                 self.trainset_loader = SDFVideoDataset(trainset3d_db, cfg=cfg)
             elif cfg.task == 'pose_kpt':
                 self.trainset_loader = PoseDataset(trainset3d_db, cfg=cfg)
@@ -155,7 +156,7 @@ class Trainer(Base):
             ckpt = torch.load(cfg.ckpt, map_location=torch.device('cpu'))['network']
             ckpt = {k.replace('module.', ''): v for k, v in ckpt.items()}
             if 'pose_kpt' in cfg.ckpt:
-                model.module.pose_model.load_state_dict(ckpt)
+                model.module.pose_model.load_state_dict(ckpt, strict=False)
                 self.logger.info('Load pose model from {}'.format(cfg.ckpt))
                 model.module.pose_model.eval()
             else:   
@@ -182,6 +183,55 @@ class Trainer(Base):
         self.start_epoch = start_epoch
         self.model = model
         self.optimizer = optimizer
+
+    def setup_pruning(self, prune_configs):
+        """设置DNS剪枝"""
+        from utils.pruning import DNSPruner, PruningHook
+        
+        # 为不同模块设置不同的剪枝阈值
+        thresholds = {}
+        excluded_layers = []
+        
+        # 设置各个模块的剪枝阈值
+        for module_name, config in prune_configs.items():
+            if module_name in ['prune_frequency', 'splice_frequency']:
+                continue
+            
+            if module_name == 'backbone':
+                prefix = 'module.backbone'
+            elif module_name == 'pose_model':
+                prefix = 'module.pose_model'
+            elif module_name == 'hand_sdf_head':
+                prefix = 'module.hand_sdf_head'
+            elif module_name == 'obj_sdf_head':
+                prefix = 'module.obj_sdf_head'
+            elif module_name == 'feat_transformer':
+                prefix = 'module.feat_transformer'
+            else:
+                prefix = f'module.{module_name}'
+            
+            # 为该模块下的所有层设置阈值
+            for layer_name, param in self.model.named_modules():
+                if layer_name.startswith(prefix):
+                    if isinstance(param, nn.Conv2d) or isinstance(param, nn.Linear):
+                        thresholds[layer_name] = config['threshold']
+            
+            # 添加排除的层
+            if isinstance(config, dict) and 'excluded_layers' in config:
+                for layer in config['excluded_layers']:
+                    excluded_layers.append(f"{prefix}.{layer}")
+        
+        # 创建剪枝器
+        self.pruner = DNSPruner(self.model, thresholds, excluded_layers)
+        
+        # 创建剪枝钩子
+        self.pruning_hook = PruningHook(
+            self.pruner,
+            prune_frequency=prune_configs.get('prune_frequency', 100),
+            splice_frequency=prune_configs.get('splice_frequency', 300)
+        )
+        
+        self.logger.info("DNS Pruning setup completed")
 
 
 class Tester(Base):
@@ -218,7 +268,7 @@ class Tester(Base):
 
         if cfg.task == 'hsdf_osdf_1net' or cfg.task == 'hsdf_osdf_2net' or cfg.task == 'hsdf_osdf_2net_pa':
             self.testset_loader = SDFDataset(testset3d_db, cfg=cfg, mode='test')
-        elif cfg.task == 'hsdf_osdf_2net_video_pa':
+        elif cfg.task == 'hsdf_osdf_2net_video_pa' or cfg.task == 'hsdf_osdf_1net_video':
             self.testset_loader = SDFVideoDataset(testset3d_db, cfg=cfg, mode='test')
         elif cfg.task == 'pose_kpt':
             self.testset_loader = PoseDataset(testset3d_db, cfg=cfg, mode='test')

@@ -5,10 +5,12 @@
 #@Author      :zerui chen
 #@Contact     :zerui.chen@inria.fr
 
+from typing import Callable
 import torch
 from torch import nn, einsum
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
+from torch.utils.hooks import RemovableHandle
 
 
 class PreNorm(nn.Module):
@@ -123,6 +125,185 @@ class VideoTransformer(nn.Module):
         else:
             return x
 
+class SqueezeAndRerange(nn.Module):
+    def __init__(self, *dim, T):
+        super().__init__()
+        self.T = T - 1
+        if all(v >= 0 for v in dim):
+            self.dim = sorted(dim, reverse=True)
+        elif all(v < 0 for v in dim):
+            self.dim = sorted(dim)
+
+    def forward(self, x):
+        for d in self.dim:
+            x = torch.squeeze(x, dim=d)
+
+        bt, d = x.size()
+        x = rearrange(x, "(b t) c -> b c t", b=bt // self.T, t=self.T, c=d)
+        return x
+        
+class ILAVideoTransformer(nn.Module):
+    def __init__(self, image_size, num_frames, dim=256, depth=4, heads=4, in_channels=256, 
+                 dim_head=64, dropout=0., scale_dim=4, use_temporary_embedding=False, 
+                 patch_size=1, sep_output=True):
+        super().__init__()
+        self.sep_output = sep_output
+        self.patch_size = patch_size
+        self.num_frames = num_frames
+        self.image_size = image_size
+        self.dim = dim
+        
+        # 计算分块数量和维度
+        num_patches = (image_size // patch_size) ** 2
+        patch_dim = in_channels * patch_size ** 2
+        
+        # 特征提取器
+        self.to_patch_embedding = nn.Sequential(
+            Rearrange('b t c (h p1) (w p2) -> b t (h w) (p1 p2 c)', p1=patch_size, p2=patch_size),
+            nn.Linear(patch_dim, dim),
+        )
+        
+        #位置编码
+        if use_temporary_embedding:
+            self.pos_embedding = nn.Parameter(torch.randn(1, num_frames, num_patches, dim))
+        else:
+            self.pos_embedding = nn.Parameter(torch.randn(1, 1, num_patches, dim))
+        
+        # cls_token用于全局时序建模
+        self.cls_token = nn.Parameter(torch.randn(1, 1, 1, dim))
+        
+        # 空间和时间transformer
+        self.spatial_transformer = Transformer(dim, depth, heads, dim_head, dim * scale_dim, dropout)
+        # self.temporal_transformer = Transformer(dim, depth, heads, dim_head, dim * scale_dim, dropout)
+        
+        # ILA相关组件
+        self.interactive_block = nn.Sequential(
+            nn.Conv2d(dim * 2, 256, 3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.Conv2d(256, 256, 3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+        )
+        
+        self.prediction_block = nn.Sequential(
+            nn.Conv2d(256, 128, 3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.MaxPool2d((2, 2)),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, 3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.MaxPool2d((2, 2)),
+            nn.ReLU(),
+            nn.AdaptiveMaxPool2d((1, 1)),
+            SqueezeAndRerange(-2, -1, T=num_frames),
+            nn.Conv1d(128, 64, 1, groups=2),
+            nn.ReLU(),
+            nn.Conv1d(64, 4, 1, groups=2),
+            nn.Tanh()
+        )
+        
+        self.conv = nn.Conv3d(in_channels=128, out_channels=128, kernel_size=(3, 1, 1), padding=(1, 0, 0))
+        self.fc = nn.Linear(128, dim)
+        
+    def forward(self, x):
+        b, t, c, h, w = x.shape
+        # 编码特征
+        x = self.to_patch_embedding(x)  # b t n d
+        b, t, n, d = x.shape
+        
+        # 添加位置编码
+        x += self.pos_embedding[:, :t, :n]
+        
+        # ILA处理：处理相邻帧间交互
+        if t > 1:
+            # 前后帧特征
+            pre_features = x[:, :-1]  # b (t-1) n d
+            cur_features = x[:, 1:]   # b (t-1) n d
+            
+            # 将前后帧特征组织为交互特征
+            pre_projed = rearrange(pre_features, "b t n d -> b d t n", b=b, t=t-1, n=n)
+            cur_projed = rearrange(cur_features, "b t n d -> b d t n", b=b, t=t-1, n=n)
+            
+            # 重整特征用于卷积处理
+            pre_projed = rearrange(pre_projed, "b d t (h w) -> b d t h w", h=h//self.patch_size, w=w//self.patch_size)
+            cur_projed = rearrange(cur_projed, "b d t (h w) -> b d t h w", h=h//self.patch_size, w=w//self.patch_size)
+            
+            # 特征融合
+            pairs = torch.cat([pre_projed, cur_projed], dim=1)
+            pairs = rearrange(pairs, "b d t h w -> (b t) d h w")
+            
+            # 交互特征计算
+            interactive_feature = self.interactive_block(pairs)
+            
+            # 尝试使用prediction_block产生位置信息
+            position_offsets = self.prediction_block(interactive_feature)
+            
+            
+            # 分离交互特征
+            pre_interactive = interactive_feature[:, :128]
+            cur_interactive = interactive_feature[:, 128:]
+            
+            # 重塑为时间序列
+            pre_interactive = rearrange(pre_interactive, "(b t) d h w -> b d t h w", b=b, t=t-1)
+            cur_interactive = rearrange(cur_interactive, "(b t) d h w -> b d t h w", b=b, t=t-1)
+            
+            # 通过位置偏移量调整交互特征
+            # 这里简单地将偏移量作为加权因子，影响很小但确保梯度流动
+            position_weight = position_offsets.mean(dim=1, keepdim=True).mean(dim=2, keepdim=True)
+            position_weight = torch.sigmoid(position_weight) * 0.1 + 0.95  # 使范围在0.95-1.05之间
+            
+            # 对交互特征使用位置权重
+            pre_interactive = pre_interactive * position_weight.unsqueeze(-1).unsqueeze(-1)
+            cur_interactive = cur_interactive * position_weight.unsqueeze(-1).unsqueeze(-1)
+            
+            # 时序融合
+            first_frame = pre_interactive[:, :, :1]
+            middle_frames = (pre_interactive[:, :, 1:] + cur_interactive[:, :, :-1]) / 2 if t > 2 else torch.tensor([]).to(pre_interactive.device)
+            last_frame = cur_interactive[:, :, -1:]
+            
+            # 组合所有帧
+            if t > 2:
+                all_frames = torch.cat([first_frame, middle_frames, last_frame], dim=2)
+            else:
+                all_frames = torch.cat([first_frame, last_frame], dim=2)
+            
+            # 3D卷积增强时序关系
+            enhanced_features = self.conv(all_frames)
+            enhanced_features = rearrange(enhanced_features, "b d t h w -> b t (h w) d")
+            
+            # 将特征维度从128映射回原始维度256
+            aligned_features = self.fc(enhanced_features)
+            
+            # 在这里，将对齐后的特征与原始特征结合
+            x_aligned = rearrange(aligned_features, "b t n d -> (b t) n d")
+        else:
+            x_aligned = rearrange(x, "b t n d -> (b t) n d")
+            
+        # 添加cls_token
+        cls_tokens = repeat(self.cls_token, '1 1 1 d -> b t 1 d', b=b, t=t)
+        cls_tokens = rearrange(cls_tokens, "b t 1 d -> (b t) 1 d")
+        x_with_cls = torch.cat((cls_tokens, x_aligned), dim=1)
+        
+        # 只进行空间transformer处理
+        x_final = self.spatial_transformer(x_with_cls)
+        
+        # 提取cls_token和空间特征
+        cls_spatial = x_final[:, 0:1, :]
+        x_spatial = x_final[:, 1:, :]
+        
+        # 转换为最终输出格式，不包含cls_token
+        x = rearrange(x_spatial, '(b t) n d -> b t d n', b=b, t=t)
+        x = rearrange(x, 'b t d (h w) -> b t d h w', h=self.image_size // self.patch_size, w=self.image_size // self.patch_size)
+        
+        if self.sep_output:
+            feat_list = []
+            for i in range(t):
+                feat_list.append(x[:, i, :, :, :])
+            return feat_list
+        else:
+            return x
+         
 
 class FSATransformer(nn.Module):
     """Factorized Self-Attention Transformer Encoder"""

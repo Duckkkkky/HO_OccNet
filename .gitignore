@@ -167,3 +167,5 @@ datasets/dexycb/dexycb_test_s3.json
 datasets/dexycb/dexycb_train_s2_full.json
 preprocess/cocoify_dexycb.py
 datasets/dexycb/splits/s2_train.json
+datasets/ho3dv3/
+preprocess/cocoify_ho3dv3.py

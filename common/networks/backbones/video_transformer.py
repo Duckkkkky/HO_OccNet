@@ -123,6 +123,23 @@ class VideoTransformer(nn.Module):
         else:
             return x
 
+class SqueezeAndRerange(nn.Module):
+    def __init__(self, *dim, T):
+        super().__init__()
+        self.T = T - 1
+        if all(v >= 0 for v in dim):
+            self.dim = sorted(dim, reverse=True)
+        elif all(v < 0 for v in dim):
+            self.dim = sorted(dim)
+
+    def forward(self, x):
+        for d in self.dim:
+            x = torch.squeeze(x, dim=d)
+
+        bt, d = x.size()
+        x = rearrange(x, "(b t) c -> b c t", b=bt // self.T, t=self.T, c=d)
+        return x
+
 class ILAVideoTransformer(nn.Module):
     def __init__(self, image_size, num_frames, dim=256, depth=4, heads=4, in_channels=256, 
                  dim_head=64, dropout=0., scale_dim=4, use_temporary_embedding=False, 

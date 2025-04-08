@@ -96,6 +96,11 @@ cfg.volume_weight = 0.5
 cfg.corner_weight = 0.2
 cfg.use_inria_aug = False
 
+# pruning config
+cfg.enable_pruning = False
+cfg.prune_frequency = 40
+cfg.splice_frequency = 30
+
 ## testing config
 cfg.test_batch_size = 1
 cfg.test_with_gt = False

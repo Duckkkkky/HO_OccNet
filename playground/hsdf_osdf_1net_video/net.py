@@ -130,6 +130,7 @@ class model(nn.Module):
                     mano_feat = mano_feat.mean(3).mean(2)
                     hand_pose_results = self.mano_head(mano_feat)
                     hand_pose_results = get_mano_preds(hand_pose_results, self.cfg, metas['cam_intr'][i], metas['hand_center_3d'][i])
+                    hand_pose_results_frames.append(hand_pose_results)
                 else:
                     hand_pose_results = None
                 
@@ -144,14 +145,14 @@ class model(nn.Module):
                 # convert the object pose to the hand-relative coordinate system
                 if cfg.obj_trans or cfg.obj_rot:
                     obj_pose_results = {}
-                    obj_transform = torch.zeros(self.cfg.train_batch_size, 4, 4).to(input_img.device)
+                    obj_transform = torch.zeros(self.cfg.train_batch_size, 4, 4).to(input_img[i].device)
                     obj_transform[:, :3, 3] = volume_joint_preds[:, 0, :] - metas['hand_center_3d'][i]
                     obj_transform[:, 3, 3] = 1
                     if cfg.obj_rot:
                         obj_transform[:, :3, :3] = obj_rot
                         obj_corners = torch.matmul(obj_rot, metas['obj_rest_corners_3d'][i]).transpose(2, 1).transpose(2, 1) + volume_joint_preds
                     else:
-                        obj_transform[:, :3, :3] = torch.eye(3).to(input_img.device)
+                        obj_transform[:, :3, :3] = torch.eye(3).to(input_img[i].device)
                         obj_corners = metas['obj_rest_corners_3d'][i] + volume_joint_preds
                     obj_pose_results['global_trans'] = obj_transform
                     obj_pose_results['center'] = volume_joint_preds

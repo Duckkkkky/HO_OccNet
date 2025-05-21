@@ -29,7 +29,7 @@ cfg.obj_pose_result_dir = '.'
 
 ## dataset
 cfg.trainset_3d = 'obman'
-cfg.trainset_3d_split = '138k'
+cfg.trainset_3d_split = '87k'
 cfg.testset = 'obman'
 cfg.testset_split = '6k'
 cfg.num_testset_samples = 6285
